@@ -17,6 +17,10 @@ import numbers
 import numpy as np
 from collections import defaultdict
 
+def _to_tensor(arr):
+    """Convert numpy array to paddle tensor, making a contiguous copy."""
+    return paddle.to_tensor(np.ascontiguousarray(arr))
+
 
 class DictCollator(object):
     """
@@ -118,13 +122,13 @@ class DyMaskCollator(object):
             label_arr = np.array(proper_items[i][1], dtype="int32")
             labels[i][:l] = label_arr
             label_masks[i][:l] = 1
-            # Debug: print first sample's label info
-            if i == 0:
-                print(f"DEBUG collator - item[1] type: {type(proper_items[i][1])}, first 10: {proper_items[i][1][:10] if hasattr(proper_items[i][1], '__getitem__') else proper_items[i][1]}")
-                print(f"DEBUG collator - label_arr: {label_arr[:10]}")
-                print(f"DEBUG collator - labels[0]: {labels[0][:10]}")
-
-        return images, image_masks, labels, label_masks
+        # Convert to Paddle tensors directly to avoid DataLoader corruption
+        return (
+            _to_tensor(images),
+            _to_tensor(image_masks),
+            _to_tensor(labels),
+            _to_tensor(label_masks),
+        )
 
 
 class LaTeXOCRCollator(object):
