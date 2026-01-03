@@ -609,10 +609,17 @@ class HMEHead(nn.Layer):
         # Project features to d_model dimension
         features = self.feature_proj(features)  # [B, d_model, H, W]
 
+        # Downsample mask to match feature spatial dimensions
+        # image_mask: [B, 1, orig_H, orig_W] -> [B, 1, H, W]
+        # Use adaptive average pooling to downsample
+        mask_downsampled = F.adaptive_avg_pool2d(image_mask, output_size=[H, W])
+        # Threshold to binary: > 0.5 means valid
+        mask_downsampled = (mask_downsampled > 0.5).astype('float32')
+        
         # Prepare mask for position encoding: [B, 1, H, W] -> [B, H, W]
         # image_mask is 1 for valid, 0 for padded
         # ImgPosEnc expects True for padding, so invert
-        mask_2d = image_mask.squeeze(1)  # [B, H, W]
+        mask_2d = mask_downsampled.squeeze(1)  # [B, H, W]
         padding_mask_2d = (1 - mask_2d).astype('bool')  # True where padded
 
         # Reshape to [B, H, W, D] for position encoding
@@ -624,9 +631,7 @@ class HMEHead(nn.Layer):
         memory = features.reshape([B, H * W, self.d_model])
 
         # Memory padding mask: [B, H*W] - True where padded
-        # image_mask is 1 where valid, 0 where padded, so invert
-        memory_key_padding_mask = (1 - image_mask.squeeze(1)).reshape([B, H * W])
-        memory_key_padding_mask = memory_key_padding_mask.astype('bool')
+        memory_key_padding_mask = padding_mask_2d.reshape([B, H * W])
 
         # Embed target sequence
         tgt = self.word_embed(labels)  # [B, L, D]
