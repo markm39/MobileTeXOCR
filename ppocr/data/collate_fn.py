@@ -103,16 +103,20 @@ class DyMaskCollator(object):
         images, image_masks = np.zeros(
             (len(proper_items), channel, max_height, max_width), dtype="float32"
         ), np.zeros((len(proper_items), 1, max_height, max_width), dtype="float32")
+        # Use int32 instead of int64 for labels - token indices are small (0-112)
+        # and int32 avoids potential shared memory issues with int64 in DataLoader
         labels, label_masks = np.zeros(
-            (len(proper_items), max_length), dtype="int64"
-        ), np.zeros((len(proper_items), max_length), dtype="int64")
+            (len(proper_items), max_length), dtype="int32"
+        ), np.zeros((len(proper_items), max_length), dtype="int32")
 
         for i in range(len(proper_items)):
             _, h, w = proper_items[i][0].shape
             images[i][:, :h, :w] = proper_items[i][0]
             image_masks[i][:, :h, :w] = 1
             l = len(proper_items[i][1])
-            labels[i][:l] = proper_items[i][1]
+            # Explicitly convert label list to numpy array to avoid memory issues
+            label_arr = np.array(proper_items[i][1], dtype="int32")
+            labels[i][:l] = label_arr
             label_masks[i][:l] = 1
 
         return images, image_masks, labels, label_masks
