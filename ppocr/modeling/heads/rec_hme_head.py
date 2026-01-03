@@ -216,16 +216,24 @@ class AttentionRefinementModule(nn.Layer):
         mask = paddle.tile(mask, [1, T, 1, 1])  # [B, T, H, W]
         mask = mask.reshape([B * T, 1, H, W])
 
-        # Collect attention maps for coverage: [B, in_chs, T, H, W]
-        # For simplicity, use prev_attn directly (already in correct shape)
-        attns = prev_attn  # [B, nhead, T, H, W]
-        
         # Cumulative sum (coverage) - exclude current step
-        attns = paddle.cumsum(attns, axis=2) - attns  # [B, nhead, T, H, W]
+        coverage = paddle.cumsum(prev_attn, axis=2) - prev_attn  # [B, nhead, T, H, W]
+        
+        # Build input channels based on coverage types
+        # Each coverage type contributes nhead channels
+        attn_list = []
+        if self.cross_coverage:
+            attn_list.append(coverage)  # [B, nhead, T, H, W]
+        if self.self_coverage:
+            attn_list.append(coverage)  # [B, nhead, T, H, W] (using same for simplicity)
+        
+        # Concatenate along channel dim: [B, in_chs, T, H, W]
+        attns = paddle.concat(attn_list, axis=1)  # [B, 2*nhead or nhead, T, H, W]
 
-        # Reshape: [B, nhead, T, H, W] -> [B*T, nhead, H, W]
-        attns = attns.transpose([0, 2, 1, 3, 4])  # [B, T, nhead, H, W]
-        attns = attns.reshape([B * T, nhead, H, W])
+        # Reshape: [B, in_chs, T, H, W] -> [B*T, in_chs, H, W]
+        in_chs = attns.shape[1]
+        attns = attns.transpose([0, 2, 1, 3, 4])  # [B, T, in_chs, H, W]
+        attns = attns.reshape([B * T, in_chs, H, W])
 
         # Apply conv to get coverage features
         cov = self.conv(attns)  # [B*T, dc, H, W]
