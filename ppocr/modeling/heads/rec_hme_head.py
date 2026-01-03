@@ -72,7 +72,16 @@ class WordPosEnc(nn.Layer):
             [B, L, D] with position encoding added
         """
         _, seq_len, _ = x.shape
-        emb = self.pe[:seq_len, :]
+        # Handle sequences longer than max_len by truncating the PE lookup
+        # (the positions beyond max_len will reuse the last position encoding)
+        if seq_len <= self.pe.shape[0]:
+            emb = self.pe[:seq_len, :]
+        else:
+            # Extend by repeating the last position encoding for positions beyond max_len
+            emb = paddle.concat([
+                self.pe,
+                self.pe[-1:, :].expand([seq_len - self.pe.shape[0], -1])
+            ], axis=0)
         return x + emb.unsqueeze(0)
 
 
