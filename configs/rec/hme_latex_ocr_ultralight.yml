@@ -27,10 +27,8 @@ Optimizer:
   epsilon: 1.0e-6
   weight_decay: 0.0001
   lr:
-    name: MultiStepDecay
-    learning_rate: 0.1
-    milestones: [200, 250]
-    gamma: 0.1
+    name: Cosine
+    learning_rate: 0.01
 
 Architecture:
   model_type: rec
