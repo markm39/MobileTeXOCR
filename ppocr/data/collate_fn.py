@@ -126,10 +126,14 @@ class DyMaskCollator(object):
         labels_int64 = labels.astype(np.int64)
         label_masks_int64 = label_masks.astype(np.int64)
 
+        # DEBUG
+        labels_t = _to_tensor(labels_int64)
+        print(f"DEBUG: numpy int64={labels_int64[0][:10]}, tensor={labels_t[0][:10].numpy()}")
+
         return (
             _to_tensor(images),
             _to_tensor(image_masks),
-            _to_tensor(labels_int64),
+            labels_t,
             _to_tensor(label_masks_int64),
         )
 
