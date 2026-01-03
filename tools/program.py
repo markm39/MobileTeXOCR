@@ -905,6 +905,7 @@ def preprocess(is_train=False):
         "PP-FormulaNet_plus-S",
         "PP-FormulaNet_plus-M",
         "PP-FormulaNet_plus-L",
+        "HME",
     ]
 
     if use_xpu:
