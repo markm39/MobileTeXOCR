@@ -42,30 +42,36 @@ class SymbolCrossEntropyLoss(nn.Layer):
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
 
-    def forward(self, pred, target):
+    def forward(self, pred, target, vocab_size=None):
         """
         Args:
-            pred: [2B, L, vocab_size] - model predictions
-            target: [2B, L] - ground truth indices
+            pred: [B, L, vocab_size] - model predictions
+            target: [B, L] - ground truth indices
+            vocab_size: int - vocabulary size for clamping
             
         Returns:
             loss: scalar
         """
+        # Ensure target is int64 and clamp to valid range
+        target = target.astype('int64')
+        if vocab_size is not None:
+            target = paddle.clip(target, min=0, max=vocab_size - 1)
+        
         # Reshape for cross entropy
-        pred = pred.reshape([-1, pred.shape[-1]])  # [2B*L, vocab_size]
-        target = target.reshape([-1])  # [2B*L]
+        pred = pred.reshape([-1, pred.shape[-1]])  # [B*L, vocab_size]
+        target = target.reshape([-1])  # [B*L]
 
         # Create mask for non-padding positions
         mask = (target != self.ignore_index).astype('float32')
 
         # Compute cross entropy with label smoothing
         if self.label_smoothing > 0:
-            vocab_size = pred.shape[-1]
+            vocab_size_actual = pred.shape[-1]
             log_probs = F.log_softmax(pred, axis=-1)
 
             # Smooth targets
-            smooth_target = paddle.full_like(log_probs, self.label_smoothing / (vocab_size - 1))
-            target_one_hot = F.one_hot(target, vocab_size).astype('float32')
+            smooth_target = paddle.full_like(log_probs, self.label_smoothing / (vocab_size_actual - 1))
+            target_one_hot = F.one_hot(target, vocab_size_actual).astype('float32')
             smooth_target = smooth_target * (1 - target_one_hot) + target_one_hot * (1 - self.label_smoothing)
 
             loss = -paddle.sum(smooth_target * log_probs, axis=-1)
@@ -242,8 +248,8 @@ class HMELoss(nn.Layer):
         labels = batch[2]  # [B, L]
         label_masks = batch[3]  # [B, L]
 
-        # Symbol cross-entropy loss
-        loss_symbol = self.symbol_loss(logits, labels)
+        # Symbol cross-entropy loss (pass vocab_size for clamping)
+        loss_symbol = self.symbol_loss(logits, labels, vocab_size=self.vocab_size)
         total_loss = loss_symbol
 
         loss_dict = {
