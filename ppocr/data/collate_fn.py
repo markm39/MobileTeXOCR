@@ -104,8 +104,8 @@ class DyMaskCollator(object):
             (len(proper_items), channel, max_height, max_width), dtype="float32"
         ), np.zeros((len(proper_items), 1, max_height, max_width), dtype="float32")
         labels, label_masks = np.zeros(
-            (len(proper_items), max_length), dtype="int64"
-        ), np.zeros((len(proper_items), max_length), dtype="int64")
+            (len(proper_items), max_length), dtype="int32"
+        ), np.zeros((len(proper_items), max_length), dtype="int32")
 
         for i in range(len(proper_items)):
             _, h, w = proper_items[i][0].shape
