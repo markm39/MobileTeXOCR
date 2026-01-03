@@ -10,7 +10,7 @@ Global:
   save_model_dir: ./output/rec/hme_accuracy/
   save_epoch_step: 10
   eval_batch_step: [0, 2000]
-  cal_metric_during_train: True
+  cal_metric_during_train: False
   pretrained_model:
   checkpoints:
   save_inference_dir: ./inference/hme_accuracy/
