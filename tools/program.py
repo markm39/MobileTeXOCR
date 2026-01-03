@@ -297,6 +297,10 @@ def train(
         model_type = None
 
     algorithm = config["Architecture"]["algorithm"]
+    
+    # Override model_type for special algorithms that need different data handling
+    if algorithm in ["CAN", "HME"]:
+        model_type = "hme"
 
     start_epoch = (
         best_model_dict["start_epoch"] if "start_epoch" in best_model_dict else 1
