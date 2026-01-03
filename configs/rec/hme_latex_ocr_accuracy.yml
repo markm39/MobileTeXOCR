@@ -24,7 +24,7 @@ Global:
 
 Optimizer:
   name: Adadelta
-  epsilon: 1e-6
+  epsilon: 1.0e-6
   weight_decay: 0.0001
   lr:
     name: MultiStepDecay
