@@ -372,7 +372,7 @@ def train(
                     preds = model(images, data=batch[1:])
                 elif model_type in ["kie", "sr"]:
                     preds = model(batch)
-                elif algorithm in ["CAN"]:
+                elif algorithm in ["CAN", "HME"]:
                     preds = model(batch[:3])
                 elif algorithm in [
                     "LaTeXOCR",
@@ -402,7 +402,7 @@ def train(
                 elif model_type in ["table"]:
                     post_result = post_process_class(preds, batch)
                     eval_class(post_result, batch)
-                elif algorithm in ["CAN"]:
+                elif algorithm in ["CAN", "HME"]:
                     model_type = "can"
                     eval_class(preds[0], batch[2:], epoch_reset=(idx == 0))
                 elif algorithm in ["LaTeXOCR"]:
@@ -701,7 +701,7 @@ def eval(
                         preds = model(images, data=batch[1:])
                     elif model_type in ["kie"]:
                         preds = model(batch)
-                    elif model_type in ["can"]:
+                    elif model_type in ["can", "hme"]:
                         preds = model(batch[:3])
                     elif model_type in ["latexocr"]:
                         preds = model(batch)
@@ -717,7 +717,7 @@ def eval(
                     preds = model(images, data=batch[1:])
                 elif model_type in ["kie"]:
                     preds = model(batch)
-                elif model_type in ["can"]:
+                elif model_type in ["can", "hme"]:
                     preds = model(batch[:3])
                 elif model_type in ["latexocr", "unimernet", "pp_formulanet"]:
                     preds = model(batch)
@@ -745,7 +745,7 @@ def eval(
                     eval_class(post_result, batch_numpy)
             elif model_type in ["sr"]:
                 eval_class(preds, batch_numpy)
-            elif model_type in ["can"]:
+            elif model_type in ["can", "hme"]:
                 eval_class(preds[0], batch_numpy[2:], epoch_reset=(idx == 0))
             elif model_type in ["latexocr", "unimernet", "pp_formulanet"]:
                 post_result = post_process_class(preds, batch[1], "eval")
