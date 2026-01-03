@@ -28,7 +28,7 @@ Optimizer:
   weight_decay: 0.0001
   lr:
     name: MultiStepDecay
-    learning_rate: 1.0
+    learning_rate: 0.1
     milestones: [300, 350]
     gamma: 0.1
 
