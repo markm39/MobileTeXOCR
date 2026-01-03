@@ -124,10 +124,12 @@ class DyMaskCollator(object):
             label_masks[i][:l] = 1
         # Return numpy arrays with safe copies - let DataLoader handle tensor conversion
         # Use int64 for labels as expected by loss function
+        labels_out = _safe_copy(labels.astype(np.int64))
+        print(f"DEBUG collator return: labels_out={labels_out[0][:10]}")
         return (
             _safe_copy(images),
             _safe_copy(image_masks),
-            _safe_copy(labels.astype(np.int64)),
+            labels_out,
             _safe_copy(label_masks.astype(np.int64)),
         )
 
