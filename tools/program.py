@@ -41,6 +41,21 @@ from ppocr.data import build_dataloader
 from ppocr.utils.export_model import export
 
 
+def batch_to_paddle(batch):
+    """Convert batch from numpy arrays to Paddle tensors.
+
+    This is needed because we use PyTorch DataLoader (to avoid Paddle's
+    numpy array corruption bug), which returns numpy arrays.
+    """
+    result = []
+    for item in batch:
+        if isinstance(item, np.ndarray):
+            result.append(paddle.to_tensor(item))
+        else:
+            result.append(item)
+    return result
+
+
 class ArgsParser(ArgumentParser):
     def __init__(self):
         super(ArgsParser, self).__init__(formatter_class=RawDescriptionHelpFormatter)
@@ -330,6 +345,8 @@ def train(
             )
 
         for idx, batch in enumerate(train_dataloader):
+            # Convert numpy arrays to Paddle tensors (from PyTorch DataLoader)
+            batch = batch_to_paddle(batch)
             model.train()
             profiler.add_profiler_step(profiler_options)
             train_reader_cost += time.time() - reader_start
@@ -689,6 +706,8 @@ def eval(
         )
         sum_images = 0
         for idx, batch in enumerate(valid_dataloader):
+            # Convert numpy arrays to Paddle tensors (from PyTorch DataLoader)
+            batch = batch_to_paddle(batch)
             if idx >= max_iter:
                 break
             images = batch[0]
@@ -806,6 +825,8 @@ def get_center(model, eval_dataloader, post_process_class):
     )
     char_center = dict()
     for idx, batch in enumerate(eval_dataloader):
+        # Convert numpy arrays to Paddle tensors (from PyTorch DataLoader)
+        batch = batch_to_paddle(batch)
         if idx >= max_iter:
             break
         images = batch[0]

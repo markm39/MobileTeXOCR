@@ -5,6 +5,7 @@ lmdb
 tqdm
 numpy
 rapidfuzz
+torch  # Used for DataLoader (Paddle's DataLoader has a numpy array corruption bug)
 opencv-python
 opencv-contrib-python
 cython

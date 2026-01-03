@@ -29,8 +29,10 @@ __dir__ = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.abspath(os.path.join(__dir__, "../..")))
 
 import copy
-from paddle.io import Dataset, DataLoader, BatchSampler, DistributedBatchSampler
+from paddle.io import Dataset, BatchSampler, DistributedBatchSampler
 import paddle.distributed as dist
+# Use PyTorch DataLoader to avoid Paddle DataLoader's numpy array corruption bug
+from torch.utils.data import DataLoader as TorchDataLoader
 
 from ppocr.data.imaug import transform, create_operators
 from ppocr.data.simple_dataset import SimpleDataSet, MultiScaleDataSet
@@ -140,14 +142,17 @@ def build_dataloader(config, mode, device, logger, seed=None):
         collate_fn = getattr(collate_fn, loader_config["collate_fn"])()
     else:
         collate_fn = None
-    data_loader = DataLoader(
+
+    # Use PyTorch DataLoader to avoid Paddle's numpy array corruption bug
+    # PyTorch DataLoader properly handles numpy arrays from collate_fn
+    data_loader = TorchDataLoader(
         dataset=dataset,
-        batch_sampler=batch_sampler,
-        places=None,  # Let Paddle handle device placement
+        batch_size=batch_size,
+        shuffle=shuffle if mode == "Train" else False,
         num_workers=num_workers,
-        return_list=True,
-        use_shared_memory=use_shared_memory,
         collate_fn=collate_fn,
+        drop_last=drop_last,
+        pin_memory=False,  # We'll convert to Paddle tensors manually
     )
 
     return data_loader

@@ -104,8 +104,8 @@ class DyMaskCollator(object):
             (len(proper_items), channel, max_height, max_width), dtype="float32"
         ), np.zeros((len(proper_items), 1, max_height, max_width), dtype="float32")
         labels, label_masks = np.zeros(
-            (len(proper_items), max_length), dtype="int32"
-        ), np.zeros((len(proper_items), max_length), dtype="int32")
+            (len(proper_items), max_length), dtype="int64"
+        ), np.zeros((len(proper_items), max_length), dtype="int64")
 
         for i in range(len(proper_items)):
             _, h, w = proper_items[i][0].shape
@@ -115,10 +115,7 @@ class DyMaskCollator(object):
             labels[i][:l] = proper_items[i][1]
             label_masks[i][:l] = 1
 
-        # DEBUG: print original code behavior
-        print(f"DEBUG original: item[1] type={type(proper_items[0][1])}, labels[0]={labels[0][:10]}")
-        # Return deep copies to avoid memory aliasing issues
-        return images.copy(), image_masks.copy(), labels.copy(), label_masks.copy()
+        return images, image_masks, labels, label_masks
 
 
 class LaTeXOCRCollator(object):
