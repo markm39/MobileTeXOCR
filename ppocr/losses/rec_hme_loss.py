@@ -221,10 +221,11 @@ class HMELoss(nn.Layer):
             predicts: Model outputs
                 - If tuple: (logits, sim) where sim is structure similarity
                 - If tensor: logits only
-            batch: Dictionary containing:
-                - 'label': [2B, L] bidirectional target sequences
-                - 'struct_label': [2B, L] optional structure labels
-                - 'counting_label': [B, vocab_size] optional counting labels
+            batch: Tuple of (images, image_masks, labels, label_masks) from DyMaskCollator
+                - images: [B, C, H, W] (not used in loss)
+                - image_masks: [B, 1, H, W] (not used in loss)
+                - labels: [B, L] target sequences
+                - label_masks: [B, L] mask for valid label positions
                 
         Returns:
             dict: Loss dictionary with 'loss' and component losses
@@ -236,8 +237,10 @@ class HMELoss(nn.Layer):
             logits = predicts
             sim = None
 
-        # Get labels
-        labels = batch['label']
+        # Get labels from batch tuple (DyMaskCollator format)
+        # batch = (images, image_masks, labels, label_masks)
+        labels = batch[2]  # [B, L]
+        label_masks = batch[3]  # [B, L]
 
         # Symbol cross-entropy loss
         loss_symbol = self.symbol_loss(logits, labels)
@@ -249,42 +252,30 @@ class HMELoss(nn.Layer):
 
         # Tree structure loss
         if self.use_struct_loss and sim is not None:
-            if 'struct_label' in batch:
-                struct_target = batch['struct_label']
-            else:
-                # If no struct_label provided, compute from labels
-                # Default: each token's parent is the previous token
-                struct_target = paddle.arange(labels.shape[1], dtype='int64')
-                struct_target = struct_target.unsqueeze(0).expand([labels.shape[0], -1])
-                struct_target = struct_target - 1  # Parent is previous token
-                struct_target = paddle.clip(struct_target, min=0)
-                # Mask padding positions with -1
-                struct_target = paddle.where(
-                    labels == 0,
-                    paddle.full_like(struct_target, -1),
-                    struct_target,
-                )
+            # If no struct_label provided, compute from labels
+            # Default: each token's parent is the previous token
+            struct_target = paddle.arange(labels.shape[1], dtype='int64')
+            struct_target = struct_target.unsqueeze(0).expand([labels.shape[0], -1])
+            struct_target = struct_target - 1  # Parent is previous token
+            struct_target = paddle.clip(struct_target, min=0)
+            # Mask padding positions with -1
+            struct_target = paddle.where(
+                labels == 0,
+                paddle.full_like(struct_target, -1),
+                struct_target,
+            )
 
             loss_struct = self.struct_loss(sim, struct_target)
             total_loss = total_loss + self.struct_weight * loss_struct
             loss_dict['loss_struct'] = loss_struct
 
-        # Counting loss (optional)
-        if self.use_counting_loss and 'counting_pred' in batch:
-            counting_pred = batch['counting_pred']
-            if 'counting_label' in batch:
-                counting_target = batch['counting_label']
-            else:
-                # Compute counting target from labels
-                # Use only first half (L2R direction)
-                B2 = labels.shape[0]
-                B = B2 // 2
-                l2r_labels = labels[:B]
-                counting_target = self._compute_counting_target(l2r_labels)
-
-            loss_counting = self.counting_loss(counting_pred, counting_target)
-            total_loss = total_loss + self.counting_weight * loss_counting
-            loss_dict['loss_counting'] = loss_counting
+        # Counting loss (optional) - disabled by default
+        if self.use_counting_loss:
+            # Compute counting target from labels
+            counting_target = self._compute_counting_target(labels)
+            # Note: counting_pred should come from model output, not batch
+            # For now, this is disabled unless model provides counting predictions
+            pass
 
         loss_dict['loss'] = total_loss
         return loss_dict

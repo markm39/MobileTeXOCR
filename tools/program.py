@@ -347,7 +347,7 @@ def train(
                         preds = model(images, data=batch[1:])
                     elif model_type in ["kie"]:
                         preds = model(batch)
-                    elif algorithm in ["CAN"]:
+                    elif algorithm in ["CAN", "HME"]:
                         preds = model(batch[:3])
                     elif algorithm in [
                         "LaTeXOCR",

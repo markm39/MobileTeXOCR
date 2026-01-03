@@ -592,62 +592,69 @@ class HMEHead(nn.Layer):
     def forward(self, inputs, targets=None):
         """
         Args:
-            inputs: List of [features, mask, labels]
+            inputs: Tuple of (features, image_mask, labels) from backbone
                 - features: [B, C, H, W] encoder output
-                - mask: [B, H, W] padding mask
-                - labels: [2B, L] bidirectional target sequences
-            targets: Optional target dict
+                - image_mask: [B, 1, H, W] image padding mask
+                - labels: [B, L] target sequences
+            targets: Optional target dict (unused, for API compatibility)
             
         Returns:
-            out: [2B, L, vocab_size] logits
-            sim: [2B, L, L] structure similarity (if use_struct_sim)
+            word_probs: [B, L, vocab_size] output logits
         """
-        features, mask, labels = inputs
+        features, image_mask, labels = inputs
 
         B, C, H, W = features.shape
         L = labels.shape[1]
 
-        # Project features
-        features = self.feature_proj(features)
+        # Project features to d_model dimension
+        features = self.feature_proj(features)  # [B, d_model, H, W]
+
+        # Prepare mask for position encoding: [B, 1, H, W] -> [B, H, W]
+        # image_mask is 1 for valid, 0 for padded
+        # ImgPosEnc expects True for padding, so invert
+        mask_2d = image_mask.squeeze(1)  # [B, H, W]
+        padding_mask_2d = (1 - mask_2d).astype('bool')  # True where padded
 
         # Reshape to [B, H, W, D] for position encoding
         features = features.transpose([0, 2, 3, 1])  # [B, H, W, D]
-        features = self.pos_enc_2d(features, mask)
+        features = self.pos_enc_2d(features, padding_mask_2d)
         features = self.norm(features)
 
         # Flatten to sequence: [B, H*W, D]
-        features = features.reshape([B, H * W, self.d_model])
+        memory = features.reshape([B, H * W, self.d_model])
 
-        # Duplicate for bidirectional decoding
-        features = paddle.concat([features, features], axis=0)  # [2B, H*W, D]
-        memory_key_padding_mask = mask.reshape([B, H * W])
-        memory_key_padding_mask = paddle.concat([memory_key_padding_mask, memory_key_padding_mask], axis=0)
+        # Memory padding mask: [B, H*W] - True where padded
+        # image_mask is 1 where valid, 0 where padded, so invert
+        memory_key_padding_mask = (1 - image_mask.squeeze(1)).reshape([B, H * W])
+        memory_key_padding_mask = memory_key_padding_mask.astype('bool')
 
         # Embed target sequence
-        tgt = self.word_embed(labels)  # [2B, L, D]
+        tgt = self.word_embed(labels)  # [B, L, D]
         tgt = self.pos_enc_1d(tgt)
 
-        # Create causal mask
+        # Create causal mask for autoregressive decoding
         tgt_mask = self._generate_square_subsequent_mask(L)
-        tgt_key_padding_mask = (labels == 0)  # Assume 0 is PAD
+        
+        # Target padding mask: True where padded (0 values are PAD tokens)
+        tgt_key_padding_mask = (labels == 0)
 
         # Decode
         out = self.decoder(
-            tgt, features, H,
+            tgt, memory, H,
             tgt_mask=tgt_mask,
             tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=memory_key_padding_mask,
         )
 
-        # Structure similarity
+        # Structure similarity (optional)
         sim = None
         if self.use_struct_sim:
             sim = self.struct_sim(out, tgt_key_padding_mask)
 
         # Project to vocabulary
-        out = self.proj(out)
+        word_probs = self.proj(out)  # [B, L, vocab_size]
 
         if sim is not None:
-            return out, sim
-        return out
+            return word_probs, sim
+        return word_probs
 

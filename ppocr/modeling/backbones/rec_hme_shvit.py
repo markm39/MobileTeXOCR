@@ -418,15 +418,23 @@ class HME_SHViT(nn.Layer):
                 if m.bias is not None:
                     zeros_(m.bias)
 
-    def forward(self, x):
+    def forward(self, inputs):
         """
         Args:
-            x: Input tensor [B, C, H, W]
+            inputs: Tuple of (images, masks, labels) for CAN-style training
+                - images: [B, C, H, W]
+                - masks: [B, 1, H, W]
+                - labels: [B, L]
             
         Returns:
-            features: [B, out_channels, H', W'] spatial features
-            or [B, H'*W', out_channels] if flattened for transformer
+            Tuple of (features, masks, labels) where:
+            - features: [B, out_channels, H', W'] spatial features
+            - masks: passed through unchanged
+            - labels: passed through unchanged
         """
+        # Unpack inputs (CAN-style: images, masks, labels)
+        x, masks, labels = inputs
+        
         # Patch embedding
         x = self.patch_embed(x)
 
@@ -443,7 +451,8 @@ class HME_SHViT(nn.Layer):
         x = self.norm(x)
         x = x.transpose([0, 3, 1, 2])  # [B, C, H, W]
 
-        return x
+        # Return tuple like DenseNet for CAN
+        return x, masks, labels
 
     def forward_features_2d(self, x):
         """
