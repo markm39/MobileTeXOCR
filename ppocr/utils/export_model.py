@@ -329,9 +329,14 @@ def dynamic_to_static(model, arch_config, logger, input_shape=None):
             input_spec.pop(4)
         model = to_static(model, input_spec=[input_spec])
     else:
-        infer_shape = [3, -1, -1]
+        # Get in_channels from config, default to 3 for RGB
+        in_channels = arch_config.get("in_channels", 3)
+        if "Backbone" in arch_config and "in_channels" in arch_config["Backbone"]:
+            in_channels = arch_config["Backbone"]["in_channels"]
+
+        infer_shape = [in_channels, -1, -1]
         if arch_config["model_type"] == "rec":
-            infer_shape = [3, 32, -1]  # for rec model, H must be 32
+            infer_shape = [in_channels, 32, -1]  # for rec model, H must be 32
             if (
                 "Transform" in arch_config
                 and arch_config["Transform"] is not None
