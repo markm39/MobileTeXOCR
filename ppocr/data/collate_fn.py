@@ -19,7 +19,9 @@ from collections import defaultdict
 
 def _to_tensor(arr):
     """Convert numpy array to paddle tensor, making a contiguous copy."""
-    return paddle.to_tensor(np.ascontiguousarray(arr))
+    # Use explicit copy to avoid memory issues with paddle.to_tensor
+    arr_copy = np.array(arr, copy=True, order='C')
+    return paddle.to_tensor(arr_copy, place=paddle.CPUPlace())
 
 
 class DictCollator(object):
