@@ -117,7 +117,8 @@ class DyMaskCollator(object):
 
         # DEBUG: print original code behavior
         print(f"DEBUG original: item[1] type={type(proper_items[0][1])}, labels[0]={labels[0][:10]}")
-        return images, image_masks, labels, label_masks
+        # Return deep copies to avoid memory aliasing issues
+        return images.copy(), image_masks.copy(), labels.copy(), label_masks.copy()
 
 
 class LaTeXOCRCollator(object):
