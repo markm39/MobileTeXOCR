@@ -641,35 +641,40 @@ class HMEHead(nn.Layer):
     def forward(self, inputs, targets=None):
         """
         Args:
-            inputs: Tuple of (features, image_mask, labels) from backbone
-                - features: [B, C, H, W] encoder output
-                - image_mask: [B, 1, H, W] image padding mask
-                - labels: [B, L] target sequences
+            inputs: Either:
+                - Tuple of (features, image_mask, labels) for training
+                - Just features tensor [B, C, H, W] for inference/export
             targets: Optional target dict (unused, for API compatibility)
-            
+
         Returns:
-            word_probs: [B, L, vocab_size] output logits
+            Training: (word_probs, sim) tuple
+            Inference: word_probs tensor from greedy decoding
         """
-        features, image_mask, labels = inputs
+        # Handle both training (tuple) and inference (tensor) modes
+        if isinstance(inputs, (list, tuple)):
+            features, image_mask, labels = inputs
+            is_training_mode = True
+        else:
+            features = inputs
+            image_mask = None
+            labels = None
+            is_training_mode = False
 
         B, C, H, W = features.shape
-        L = labels.shape[1]
 
         # Project features to d_model dimension
         features = self.feature_proj(features)  # [B, d_model, H, W]
 
-        # Downsample mask to match feature spatial dimensions
-        # image_mask: [B, 1, orig_H, orig_W] -> [B, 1, H, W]
-        # Use adaptive average pooling to downsample
-        mask_downsampled = F.adaptive_avg_pool2d(image_mask, output_size=[H, W])
-        # Threshold to binary: > 0.5 means valid
-        mask_downsampled = (mask_downsampled > 0.5).astype('float32')
-        
-        # Prepare mask for position encoding: [B, 1, H, W] -> [B, H, W]
-        # image_mask is 1 for valid, 0 for padded
-        # ImgPosEnc expects True for padding, so invert
-        mask_2d = mask_downsampled.squeeze(1)  # [B, H, W]
-        padding_mask_2d = (1 - mask_2d).astype('bool')  # True where padded
+        # Handle mask - create default if not provided (inference mode)
+        if image_mask is not None:
+            # Downsample mask to match feature spatial dimensions
+            mask_downsampled = F.adaptive_avg_pool2d(image_mask, output_size=[H, W])
+            mask_downsampled = (mask_downsampled > 0.5).astype('float32')
+            mask_2d = mask_downsampled.squeeze(1)  # [B, H, W]
+            padding_mask_2d = (1 - mask_2d).astype('bool')  # True where padded
+        else:
+            # No mask provided - assume all positions are valid
+            padding_mask_2d = paddle.zeros([B, H, W], dtype='bool')
 
         # Reshape to [B, H, W, D] for position encoding
         features = features.transpose([0, 2, 3, 1])  # [B, H, W, D]
@@ -682,36 +687,101 @@ class HMEHead(nn.Layer):
         # Memory padding mask: [B, H*W] - True where padded
         memory_key_padding_mask = padding_mask_2d.reshape([B, H * W])
 
-        # Clamp labels to valid range [0, vocab_size-1] to avoid embedding errors
-        labels = paddle.clip(labels, min=0, max=self.vocab_size - 1)
-        
-        # Embed target sequence
-        tgt = self.word_embed(labels)  # [B, L, D]
+        if is_training_mode:
+            # Training mode: use teacher forcing with ground truth labels
+            L = labels.shape[1]
+
+            # Clamp labels to valid range [0, vocab_size-1] to avoid embedding errors
+            labels = paddle.clip(labels, min=0, max=self.vocab_size - 1)
+
+            # Embed target sequence
+            tgt = self.word_embed(labels)  # [B, L, D]
+            tgt = self.pos_enc_1d(tgt)
+
+            # Create causal mask for autoregressive decoding
+            tgt_mask = self._generate_square_subsequent_mask(L)
+
+            # Target padding mask: True where padded (0 values are PAD tokens)
+            tgt_key_padding_mask = (labels == 0)
+
+            # Decode
+            out = self.decoder(
+                tgt, memory, H, W,
+                tgt_mask=tgt_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+            )
+
+            # Structure similarity (optional)
+            sim = None
+            if self.use_struct_sim:
+                sim = self.struct_sim(out, tgt_key_padding_mask)
+
+            # Project to vocabulary
+            word_probs = self.proj(out)  # [B, L, vocab_size]
+
+            return (word_probs, sim)
+        else:
+            # Inference/export mode: return memory for external decoding
+            # Autoregressive loops don't export well with JIT
+            # Return: memory [B, H*W, D], height, width for external decoder
+            return memory
+
+    def _greedy_decode(self, memory, H, W, memory_key_padding_mask):
+        """Greedy autoregressive decoding for inference."""
+        B = memory.shape[0]
+        device = memory.place
+
+        # Start with SOS token (assuming index 1 is SOS, 2 is EOS)
+        # Adjust these indices based on your vocabulary
+        SOS_IDX = 1
+        EOS_IDX = 2
+
+        # Initialize with SOS token
+        ys = paddle.full([B, 1], SOS_IDX, dtype='int64')
+
+        for i in range(self.max_len - 1):
+            # Embed current sequence
+            tgt = self.word_embed(ys)  # [B, curr_len, D]
+            tgt = self.pos_enc_1d(tgt)
+
+            # Create causal mask
+            curr_len = ys.shape[1]
+            tgt_mask = self._generate_square_subsequent_mask(curr_len)
+            tgt_key_padding_mask = paddle.zeros([B, curr_len], dtype='bool')
+
+            # Decode
+            out = self.decoder(
+                tgt, memory, H, W,
+                tgt_mask=tgt_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+            )
+
+            # Get next token prediction
+            logits = self.proj(out[:, -1:, :])  # [B, 1, vocab_size]
+            next_token = paddle.argmax(logits, axis=-1)  # [B, 1]
+
+            # Append to sequence
+            ys = paddle.concat([ys, next_token], axis=1)
+
+            # Check if all sequences have generated EOS
+            if paddle.all(next_token == EOS_IDX):
+                break
+
+        # Return final logits for the full sequence
+        tgt = self.word_embed(ys)
         tgt = self.pos_enc_1d(tgt)
+        tgt_mask = self._generate_square_subsequent_mask(ys.shape[1])
+        tgt_key_padding_mask = paddle.zeros([B, ys.shape[1]], dtype='bool')
 
-        # Create causal mask for autoregressive decoding
-        tgt_mask = self._generate_square_subsequent_mask(L)
-        
-        # Target padding mask: True where padded (0 values are PAD tokens)
-        tgt_key_padding_mask = (labels == 0)
-
-        # Decode
         out = self.decoder(
             tgt, memory, H, W,
             tgt_mask=tgt_mask,
             tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=memory_key_padding_mask,
         )
+        word_probs = self.proj(out)
 
-        # Structure similarity (optional)
-        sim = None
-        if self.use_struct_sim:
-            sim = self.struct_sim(out, tgt_key_padding_mask)
-
-        # Project to vocabulary
-        word_probs = self.proj(out)  # [B, L, vocab_size]
-
-        # Always return tuple for compatibility with CAN metric/loss interface
-        # Format: (word_probs, extra) where extra is sim or None
-        return (word_probs, sim)
+        return word_probs
 

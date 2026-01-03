@@ -421,20 +421,24 @@ class HME_SHViT(nn.Layer):
     def forward(self, inputs):
         """
         Args:
-            inputs: Tuple of (images, masks, labels) for CAN-style training
-                - images: [B, C, H, W]
-                - masks: [B, 1, H, W]
-                - labels: [B, L]
-            
+            inputs: Either:
+                - Tuple of (images, masks, labels) for CAN-style training
+                - Just images tensor [B, C, H, W] for inference/export
+
         Returns:
-            Tuple of (features, masks, labels) where:
-            - features: [B, out_channels, H', W'] spatial features
-            - masks: passed through unchanged
-            - labels: passed through unchanged
+            Either:
+                - Tuple of (features, masks, labels) during training
+                - Just features tensor during inference
         """
-        # Unpack inputs (CAN-style: images, masks, labels)
-        x, masks, labels = inputs
-        
+        # Handle both training (tuple) and inference (tensor) modes
+        if isinstance(inputs, (list, tuple)):
+            x, masks, labels = inputs
+            is_training_mode = True
+        else:
+            x = inputs
+            masks, labels = None, None
+            is_training_mode = False
+
         # Patch embedding
         x = self.patch_embed(x)
 
@@ -451,8 +455,11 @@ class HME_SHViT(nn.Layer):
         x = self.norm(x)
         x = x.transpose([0, 3, 1, 2])  # [B, C, H, W]
 
-        # Return tuple like DenseNet for CAN
-        return x, masks, labels
+        # Return tuple during training, just features during inference
+        if is_training_mode:
+            return x, masks, labels
+        else:
+            return x
 
     def forward_features_2d(self, x):
         """
