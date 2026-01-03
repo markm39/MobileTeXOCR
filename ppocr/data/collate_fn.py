@@ -118,6 +118,11 @@ class DyMaskCollator(object):
             label_arr = np.array(proper_items[i][1], dtype="int32")
             labels[i][:l] = label_arr
             label_masks[i][:l] = 1
+            # Debug: print first sample's label info
+            if i == 0:
+                print(f"DEBUG collator - item[1] type: {type(proper_items[i][1])}, first 10: {proper_items[i][1][:10] if hasattr(proper_items[i][1], '__getitem__') else proper_items[i][1]}")
+                print(f"DEBUG collator - label_arr: {label_arr[:10]}")
+                print(f"DEBUG collator - labels[0]: {labels[0][:10]}")
 
         return images, image_masks, labels, label_masks
 
