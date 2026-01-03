@@ -285,6 +285,26 @@ class TransformerDecoderLayer(nn.Layer):
         self.norm3 = nn.LayerNorm(d_model)
         self.dropout3 = nn.Dropout(dropout)
 
+    def _convert_padding_mask_to_attn_mask(self, padding_mask, tgt_len=None):
+        """
+        Convert padding mask [B, L] to attention mask format for PaddlePaddle.
+        PaddlePaddle expects: [B, 1, 1, L] or [B, 1, T, L] for cross attention
+        Values: 0 for attend, -inf for mask
+        """
+        if padding_mask is None:
+            return None
+        # padding_mask: [B, L] - True where padded
+        # Convert to float with -inf for masked positions
+        attn_mask = padding_mask.astype('float32') * (-1e9)
+        # Reshape to [B, 1, 1, L] for broadcasting
+        if tgt_len is not None:
+            # For cross attention: [B, 1, T, L]
+            attn_mask = attn_mask.unsqueeze(1).unsqueeze(2)
+            attn_mask = paddle.tile(attn_mask, [1, 1, tgt_len, 1])
+        else:
+            attn_mask = attn_mask.unsqueeze(1).unsqueeze(2)
+        return attn_mask
+
     def forward(
         self,
         tgt,
@@ -300,21 +320,33 @@ class TransformerDecoderLayer(nn.Layer):
             memory: [B, L_mem, D]
             coverage_bias: [B*nhead, L_tgt, L_mem] optional bias from ARM
         """
+        L_tgt = tgt.shape[1]
+        
+        # Convert padding masks to attention masks
+        self_attn_mask = self._convert_padding_mask_to_attn_mask(tgt_key_padding_mask)
+        cross_attn_mask = self._convert_padding_mask_to_attn_mask(memory_key_padding_mask, L_tgt)
+        
+        # Combine with causal mask for self attention
+        if tgt_mask is not None and self_attn_mask is not None:
+            # tgt_mask: [L_tgt, L_tgt] causal mask
+            # self_attn_mask: [B, 1, 1, L_tgt] padding mask
+            combined_mask = tgt_mask.unsqueeze(0).unsqueeze(0) + self_attn_mask
+            self_attn_mask = combined_mask
+        elif tgt_mask is not None:
+            self_attn_mask = tgt_mask
+
         # Self attention
         tgt2 = self.self_attn(
             tgt, tgt, tgt,
-            attn_mask=tgt_mask,
-            key_padding_mask=tgt_key_padding_mask,
+            attn_mask=self_attn_mask,
         )
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
 
-        # Cross attention with optional coverage bias
-        # Note: PaddlePaddle's MultiHeadAttention doesn't directly support bias
-        # We handle coverage differently here
+        # Cross attention
         tgt2 = self.cross_attn(
             tgt, memory, memory,
-            key_padding_mask=memory_key_padding_mask,
+            attn_mask=cross_attn_mask,
         )
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
