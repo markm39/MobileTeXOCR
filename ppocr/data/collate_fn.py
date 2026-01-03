@@ -17,10 +17,6 @@ import numbers
 import numpy as np
 from collections import defaultdict
 
-def _safe_copy(arr):
-    """Create a safe contiguous copy of numpy array."""
-    return np.array(arr, dtype=arr.dtype, copy=True, order='C')
-
 
 class DictCollator(object):
     """
@@ -107,31 +103,21 @@ class DyMaskCollator(object):
         images, image_masks = np.zeros(
             (len(proper_items), channel, max_height, max_width), dtype="float32"
         ), np.zeros((len(proper_items), 1, max_height, max_width), dtype="float32")
-        # Use int32 instead of int64 for labels - token indices are small (0-112)
-        # and int32 avoids potential shared memory issues with int64 in DataLoader
         labels, label_masks = np.zeros(
-            (len(proper_items), max_length), dtype="int32"
-        ), np.zeros((len(proper_items), max_length), dtype="int32")
+            (len(proper_items), max_length), dtype="int64"
+        ), np.zeros((len(proper_items), max_length), dtype="int64")
 
         for i in range(len(proper_items)):
             _, h, w = proper_items[i][0].shape
             images[i][:, :h, :w] = proper_items[i][0]
             image_masks[i][:, :h, :w] = 1
             l = len(proper_items[i][1])
-            # Explicitly convert label list to numpy array to avoid memory issues
-            label_arr = np.array(proper_items[i][1], dtype="int32")
-            labels[i][:l] = label_arr
+            labels[i][:l] = proper_items[i][1]
             label_masks[i][:l] = 1
-        # Return numpy arrays with safe copies - let DataLoader handle tensor conversion
-        # Use int64 for labels as expected by loss function
-        labels_out = _safe_copy(labels.astype(np.int64))
-        print(f"DEBUG collator return: labels_out={labels_out[0][:10]}")
-        return (
-            _safe_copy(images),
-            _safe_copy(image_masks),
-            labels_out,
-            _safe_copy(label_masks.astype(np.int64)),
-        )
+
+        # DEBUG: print original code behavior
+        print(f"DEBUG original: item[1] type={type(proper_items[0][1])}, labels[0]={labels[0][:10]}")
+        return images, image_masks, labels, label_masks
 
 
 class LaTeXOCRCollator(object):

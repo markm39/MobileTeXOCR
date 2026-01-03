@@ -94,8 +94,7 @@ Train:
     shuffle: True
     batch_size_per_card: 16
     drop_last: True
-    num_workers: 0
-    use_shared_memory: False
+    num_workers: 4
     collate_fn: DyMaskCollator
 
 Eval:
@@ -120,7 +119,6 @@ Eval:
     shuffle: False
     drop_last: False
     batch_size_per_card: 1
-    num_workers: 0
-    use_shared_memory: False
+    num_workers: 4
     collate_fn: DyMaskCollator
 

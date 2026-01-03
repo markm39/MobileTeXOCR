@@ -1643,12 +1643,7 @@ class CANLabelEncode(BaseRecLabelEncode):
         if isinstance(label, str):
             label = label.strip().split()
         label.append(self.end_str)
-        encoded = self.encode(label)
-        # Convert to numpy array to avoid corruption in DataLoader multiprocessing
-        if encoded is not None:
-            data["label"] = np.array(encoded, dtype=np.int32)
-        else:
-            data["label"] = None
+        data["label"] = self.encode(label)
         return data
 
 
