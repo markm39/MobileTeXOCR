@@ -17,9 +17,12 @@ import numbers
 import numpy as np
 from collections import defaultdict
 
-def _to_tensor(arr):
+def _to_tensor(arr, dtype=None):
     """Convert numpy array to paddle tensor, making a contiguous copy."""
-    return paddle.to_tensor(np.ascontiguousarray(arr))
+    arr_copy = np.ascontiguousarray(arr)
+    if dtype:
+        return paddle.to_tensor(arr_copy, dtype=dtype)
+    return paddle.to_tensor(arr_copy)
 
 
 class DictCollator(object):
@@ -122,12 +125,21 @@ class DyMaskCollator(object):
             label_arr = np.array(proper_items[i][1], dtype="int32")
             labels[i][:l] = label_arr
             label_masks[i][:l] = 1
+        # DEBUG: Print label info before tensor conversion
+        print(f"DEBUG: labels numpy dtype={labels.dtype}, first sample={labels[0][:15]}")
+
         # Convert to Paddle tensors directly to avoid DataLoader corruption
+        # Use int64 for labels as Paddle expects
+        labels_tensor = _to_tensor(labels, dtype='int64')
+        label_masks_tensor = _to_tensor(label_masks, dtype='int64')
+
+        print(f"DEBUG: labels tensor dtype={labels_tensor.dtype}, first sample={labels_tensor[0][:15].numpy()}")
+
         return (
             _to_tensor(images),
             _to_tensor(image_masks),
-            _to_tensor(labels),
-            _to_tensor(label_masks),
+            labels_tensor,
+            label_masks_tensor,
         )
 
 
