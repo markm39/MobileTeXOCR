@@ -702,7 +702,7 @@ class HMEHead(nn.Layer):
         # Project to vocabulary
         word_probs = self.proj(out)  # [B, L, vocab_size]
 
-        if sim is not None:
-            return word_probs, sim
-        return word_probs
+        # Always return tuple for compatibility with CAN metric/loss interface
+        # Format: (word_probs, extra) where extra is sim or None
+        return (word_probs, sim)
 
