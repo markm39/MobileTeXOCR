@@ -17,11 +17,9 @@ import numbers
 import numpy as np
 from collections import defaultdict
 
-def _to_tensor(arr):
-    """Convert numpy array to paddle tensor, making a contiguous copy."""
-    # Use explicit copy to avoid memory issues with paddle.to_tensor
-    arr_copy = np.array(arr, copy=True, order='C')
-    return paddle.to_tensor(arr_copy, place=paddle.CPUPlace())
+def _safe_copy(arr):
+    """Create a safe contiguous copy of numpy array."""
+    return np.array(arr, dtype=arr.dtype, copy=True, order='C')
 
 
 class DictCollator(object):
@@ -124,19 +122,13 @@ class DyMaskCollator(object):
             label_arr = np.array(proper_items[i][1], dtype="int32")
             labels[i][:l] = label_arr
             label_masks[i][:l] = 1
-        # Convert to int64 in numpy BEFORE paddle.to_tensor to avoid Paddle dtype conversion bug
-        labels_int64 = labels.astype(np.int64)
-        label_masks_int64 = label_masks.astype(np.int64)
-
-        # DEBUG
-        labels_t = _to_tensor(labels_int64)
-        print(f"DEBUG: numpy int64={labels_int64[0][:10]}, tensor={labels_t[0][:10].numpy()}")
-
+        # Return numpy arrays with safe copies - let DataLoader handle tensor conversion
+        # Use int64 for labels as expected by loss function
         return (
-            _to_tensor(images),
-            _to_tensor(image_masks),
-            labels_t,
-            _to_tensor(label_masks_int64),
+            _safe_copy(images),
+            _safe_copy(image_masks),
+            _safe_copy(labels.astype(np.int64)),
+            _safe_copy(label_masks.astype(np.int64)),
         )
 
 
