@@ -139,12 +139,13 @@ class CANMetric(object):
         word_scores = []
         for s1, s2, s3 in zip(word_label, word_pred, word_label_mask):
             seq_len = int(np.sum(s3))
-            if seq_len == 0:
-                # Empty sequence, treat as perfect match (or skip)
-                word_scores.append(1.0)
+            s1_slice = s1[:seq_len] if seq_len > 0 else s1[:1]
+            s2_slice = s2[:seq_len] if seq_len > 0 else s2[:1]
+            
+            # Handle edge cases to avoid division by zero
+            if len(s1_slice) == 0:
+                word_scores.append(1.0)  # Empty label = perfect match
             else:
-                s1_slice = s1[:seq_len]
-                s2_slice = s2[:seq_len]
                 ratio = SequenceMatcher(None, s1_slice, s2_slice, autojunk=False).ratio()
                 score = ratio * (len(s1_slice) + len(s2_slice)) / len(s1_slice) / 2
                 word_scores.append(score)
