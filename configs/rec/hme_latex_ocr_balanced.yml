@@ -1,0 +1,124 @@
+# HME LaTeX OCR - Balanced Variant
+# Target: 15-30MB, <80ms on iPhone 14, ~62% CROHME ExpRate
+# Based on: SHViT encoder + TAMER decoder with coverage attention
+
+Global:
+  use_gpu: True
+  epoch_num: 400
+  log_smooth_window: 20
+  print_batch_step: 100
+  save_model_dir: ./output/rec/hme_balanced/
+  save_epoch_step: 10
+  eval_batch_step: [0, 2000]
+  cal_metric_during_train: True
+  pretrained_model:
+  checkpoints:
+  save_inference_dir: ./inference/hme_balanced/
+  use_visualdl: True
+  infer_img: doc/datasets/crohme_demo/hme_00.jpg
+  character_dict_path: ppocr/utils/dict/latex_symbol_dict.txt
+  max_text_length: 200
+  infer_mode: False
+  use_space_char: False
+  save_res_path: ./output/rec/predicts_hme_balanced.txt
+
+Optimizer:
+  name: Adadelta
+  epsilon: 1e-6
+  weight_decay: 0.0001
+  lr:
+    name: MultiStepDecay
+    learning_rate: 1.0
+    milestones: [300, 350]
+    gamma: 0.1
+
+Architecture:
+  model_type: rec
+  algorithm: HME
+  in_channels: 1
+  Transform:
+  Backbone:
+    name: HME_SHViT_Small
+    in_channels: 1
+    out_channels: 256
+  Head:
+    name: HMEHead
+    in_channels: 256
+    vocab_size: 113
+    d_model: 256
+    nhead: 8
+    num_decoder_layers: 3
+    dim_feedforward: 1024
+    dropout: 0.3
+    dc: 32
+    cross_coverage: True
+    self_coverage: True
+    use_struct_sim: True
+    max_len: 200
+
+Loss:
+  name: HMELoss
+  vocab_size: 113
+  ignore_index: 0
+  label_smoothing: 0.0
+  struct_weight: 1.0
+  use_struct_loss: True
+  use_counting_loss: False
+
+PostProcess:
+  name: CANLabelDecode
+
+Metric:
+  name: CANMetric
+  main_indicator: exp_rate
+
+Train:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ./train_data/CROHME/training/images/
+    label_file_list: ["./train_data/CROHME/training/labels.txt"]
+    transforms:
+      - DecodeImage:
+          channel_first: False
+      - NormalizeImage:
+          mean: [0, 0, 0]
+          std: [1, 1, 1]
+          order: 'hwc'
+      - GrayImageChannelFormat:
+          inverse: True
+      - CANLabelEncode:
+          lower: False
+      - KeepKeys:
+          keep_keys: ['image', 'label']
+  loader:
+    shuffle: True
+    batch_size_per_card: 8
+    drop_last: True
+    num_workers: 4
+    collate_fn: DyMaskCollator
+
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ./train_data/CROHME/evaluation/images/
+    label_file_list: ["./train_data/CROHME/evaluation/labels.txt"]
+    transforms:
+      - DecodeImage:
+          channel_first: False
+      - NormalizeImage:
+          mean: [0, 0, 0]
+          std: [1, 1, 1]
+          order: 'hwc'
+      - GrayImageChannelFormat:
+          inverse: True
+      - CANLabelEncode:
+          lower: False
+      - KeepKeys:
+          keep_keys: ['image', 'label']
+  loader:
+    shuffle: False
+    drop_last: False
+    batch_size_per_card: 1
+    num_workers: 4
+    collate_fn: DyMaskCollator
+

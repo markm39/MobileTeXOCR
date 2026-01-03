@@ -46,6 +46,7 @@ def build_head(config):
     from .rec_cppd_head import CPPDHead
     from .rec_unimernet_head import UniMERNetHead
     from .rec_ppformulanet_head import PPFormulaNet_Head
+    from .rec_hme_head import HMEHead
 
     # cls head
     from .cls_head import ClsHead
@@ -91,6 +92,7 @@ def build_head(config):
         "CPPDHead",
         "UniMERNetHead",
         "PPFormulaNet_Head",
+        "HMEHead",
     ]
 
     if config["name"] == "DRRGHead":

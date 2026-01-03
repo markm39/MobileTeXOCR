@@ -1,0 +1,291 @@
+# Copyright (c) 2024 PaddlePaddle Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+Loss functions for HME (Handwritten Mathematical Expression) Recognition.
+
+Based on:
+- CoMER/TAMER: Cross-entropy loss for sequence prediction
+- TAMER: Tree structure loss for bracket matching
+- CAN: Counting loss as auxiliary task
+
+Combined loss:
+    L = L_symbol + λ1 * L_struct + λ2 * L_counting
+"""
+
+import paddle
+import paddle.nn as nn
+import paddle.nn.functional as F
+
+__all__ = ["HMELoss"]
+
+
+class SymbolCrossEntropyLoss(nn.Layer):
+    """
+    Cross-entropy loss for symbol prediction.
+    Handles bidirectional sequences (L2R and R2L concatenated).
+    """
+
+    def __init__(self, ignore_index=0, label_smoothing=0.0):
+        super().__init__()
+        self.ignore_index = ignore_index
+        self.label_smoothing = label_smoothing
+
+    def forward(self, pred, target):
+        """
+        Args:
+            pred: [2B, L, vocab_size] - model predictions
+            target: [2B, L] - ground truth indices
+            
+        Returns:
+            loss: scalar
+        """
+        # Reshape for cross entropy
+        pred = pred.reshape([-1, pred.shape[-1]])  # [2B*L, vocab_size]
+        target = target.reshape([-1])  # [2B*L]
+
+        # Create mask for non-padding positions
+        mask = (target != self.ignore_index).astype('float32')
+
+        # Compute cross entropy with label smoothing
+        if self.label_smoothing > 0:
+            vocab_size = pred.shape[-1]
+            log_probs = F.log_softmax(pred, axis=-1)
+
+            # Smooth targets
+            smooth_target = paddle.full_like(log_probs, self.label_smoothing / (vocab_size - 1))
+            target_one_hot = F.one_hot(target, vocab_size).astype('float32')
+            smooth_target = smooth_target * (1 - target_one_hot) + target_one_hot * (1 - self.label_smoothing)
+
+            loss = -paddle.sum(smooth_target * log_probs, axis=-1)
+        else:
+            loss = F.cross_entropy(pred, target, reduction='none')
+
+        # Apply mask and average
+        loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+        return loss
+
+
+class TreeStructureLoss(nn.Layer):
+    """
+    Tree structure loss from TAMER.
+    Trains the model to predict parent-child relationships in the parse tree.
+    
+    For each token, predicts which previous token is its structural parent.
+    This helps with bracket matching and nested structure recognition.
+    """
+
+    def __init__(self, ignore_index=-1):
+        super().__init__()
+        self.ignore_index = ignore_index
+
+    def forward(self, sim, struct_target):
+        """
+        Args:
+            sim: [2B, L, L] - structure similarity predictions
+            struct_target: [2B, L] - ground truth parent indices for each position
+            
+        Returns:
+            loss: scalar
+        """
+        B2, L, _ = sim.shape
+
+        # Reshape similarity to [2B*L, L] for cross entropy
+        sim = sim.reshape([-1, L])  # [2B*L, L]
+        struct_target = struct_target.reshape([-1])  # [2B*L]
+
+        # Create mask for valid positions (not ignore_index)
+        mask = (struct_target != self.ignore_index).astype('float32')
+
+        # Replace ignore_index with 0 for cross_entropy (will be masked out)
+        struct_target = paddle.where(
+            struct_target == self.ignore_index,
+            paddle.zeros_like(struct_target),
+            struct_target,
+        )
+
+        # Cross entropy loss
+        loss = F.cross_entropy(sim, struct_target, reduction='none')
+
+        # Apply mask and average
+        loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+        return loss
+
+
+class CountingLoss(nn.Layer):
+    """
+    Counting loss from CAN (Counting-Aware Network).
+    Predicts the frequency of each symbol as an auxiliary task.
+    Helps prevent repeated/missing symbols.
+    """
+
+    def __init__(self, reduction='mean'):
+        super().__init__()
+        self.reduction = reduction
+
+    def forward(self, counting_pred, counting_target):
+        """
+        Args:
+            counting_pred: [B, vocab_size] - predicted symbol counts
+            counting_target: [B, vocab_size] - ground truth symbol counts
+            
+        Returns:
+            loss: scalar
+        """
+        loss = F.l1_loss(counting_pred, counting_target, reduction=self.reduction)
+        return loss
+
+
+class HMELoss(nn.Layer):
+    """
+    Combined loss for HME recognition.
+    
+    L = L_symbol + λ_struct * L_struct + λ_count * L_counting
+    
+    Args:
+        vocab_size: Vocabulary size for counting loss
+        ignore_index: Padding index to ignore
+        label_smoothing: Label smoothing factor for symbol loss
+        struct_weight: Weight for tree structure loss (default: 1.0)
+        counting_weight: Weight for counting loss (default: 0.0 = disabled)
+        use_struct_loss: Whether to use tree structure loss
+        use_counting_loss: Whether to use counting loss
+    """
+
+    def __init__(
+        self,
+        vocab_size=113,
+        ignore_index=0,
+        label_smoothing=0.0,
+        struct_weight=1.0,
+        counting_weight=0.1,
+        use_struct_loss=True,
+        use_counting_loss=False,
+        **kwargs,
+    ):
+        super().__init__()
+
+        self.symbol_loss = SymbolCrossEntropyLoss(
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+        )
+
+        self.use_struct_loss = use_struct_loss
+        self.struct_weight = struct_weight
+        if use_struct_loss:
+            self.struct_loss = TreeStructureLoss(ignore_index=-1)
+
+        self.use_counting_loss = use_counting_loss
+        self.counting_weight = counting_weight
+        if use_counting_loss:
+            self.counting_loss = CountingLoss()
+
+        self.vocab_size = vocab_size
+
+    def _compute_counting_target(self, labels, ignore_index=0):
+        """
+        Compute ground truth symbol counts from target labels.
+        
+        Args:
+            labels: [B, L] - target sequences (only use L2R direction)
+            ignore_index: padding index
+            
+        Returns:
+            counts: [B, vocab_size]
+        """
+        B, L = labels.shape
+        counts = paddle.zeros([B, self.vocab_size], dtype='float32')
+
+        for i in range(B):
+            for j in range(L):
+                idx = labels[i, j].item()
+                if idx != ignore_index:
+                    counts[i, idx] += 1
+
+        return counts
+
+    def forward(self, predicts, batch):
+        """
+        Args:
+            predicts: Model outputs
+                - If tuple: (logits, sim) where sim is structure similarity
+                - If tensor: logits only
+            batch: Dictionary containing:
+                - 'label': [2B, L] bidirectional target sequences
+                - 'struct_label': [2B, L] optional structure labels
+                - 'counting_label': [B, vocab_size] optional counting labels
+                
+        Returns:
+            dict: Loss dictionary with 'loss' and component losses
+        """
+        # Unpack predictions
+        if isinstance(predicts, tuple):
+            logits, sim = predicts
+        else:
+            logits = predicts
+            sim = None
+
+        # Get labels
+        labels = batch['label']
+
+        # Symbol cross-entropy loss
+        loss_symbol = self.symbol_loss(logits, labels)
+        total_loss = loss_symbol
+
+        loss_dict = {
+            'loss_symbol': loss_symbol,
+        }
+
+        # Tree structure loss
+        if self.use_struct_loss and sim is not None:
+            if 'struct_label' in batch:
+                struct_target = batch['struct_label']
+            else:
+                # If no struct_label provided, compute from labels
+                # Default: each token's parent is the previous token
+                struct_target = paddle.arange(labels.shape[1], dtype='int64')
+                struct_target = struct_target.unsqueeze(0).expand([labels.shape[0], -1])
+                struct_target = struct_target - 1  # Parent is previous token
+                struct_target = paddle.clip(struct_target, min=0)
+                # Mask padding positions with -1
+                struct_target = paddle.where(
+                    labels == 0,
+                    paddle.full_like(struct_target, -1),
+                    struct_target,
+                )
+
+            loss_struct = self.struct_loss(sim, struct_target)
+            total_loss = total_loss + self.struct_weight * loss_struct
+            loss_dict['loss_struct'] = loss_struct
+
+        # Counting loss (optional)
+        if self.use_counting_loss and 'counting_pred' in batch:
+            counting_pred = batch['counting_pred']
+            if 'counting_label' in batch:
+                counting_target = batch['counting_label']
+            else:
+                # Compute counting target from labels
+                # Use only first half (L2R direction)
+                B2 = labels.shape[0]
+                B = B2 // 2
+                l2r_labels = labels[:B]
+                counting_target = self._compute_counting_target(l2r_labels)
+
+            loss_counting = self.counting_loss(counting_pred, counting_target)
+            total_loss = total_loss + self.counting_weight * loss_counting
+            loss_dict['loss_counting'] = loss_counting
+
+        loss_dict['loss'] = total_loss
+        return loss_dict
+

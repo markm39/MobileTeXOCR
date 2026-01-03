@@ -48,6 +48,7 @@ from .rec_cppd_loss import CPPDLoss
 from .rec_latexocr_loss import LaTeXOCRLoss
 from .rec_unimernet_loss import UniMERNetLoss
 from .rec_ppformulanet_loss import PPFormulaNet_S_Loss, PPFormulaNet_L_Loss
+from .rec_hme_loss import HMELoss
 
 # cls loss
 from .cls_loss import ClsLoss
@@ -114,6 +115,7 @@ def build_loss(config):
         "UniMERNetLoss",
         "PPFormulaNet_S_Loss",
         "PPFormulaNet_L_Loss",
+        "HMELoss",
     ]
     config = copy.deepcopy(config)
     module_name = config.pop("name")

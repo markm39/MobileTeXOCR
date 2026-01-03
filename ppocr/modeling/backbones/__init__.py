@@ -78,6 +78,12 @@ def build_backbone(config, model_type):
             PPHGNetV2_B4_Formula,
             PPHGNetV2_B6_Formula,
         )
+        from .rec_hme_shvit import (
+            HME_SHViT,
+            HME_SHViT_Tiny,
+            HME_SHViT_Small,
+            HME_SHViT_Base,
+        )
 
         support_dict = [
             "MobileNetV1Enhance",
@@ -110,6 +116,10 @@ def build_backbone(config, model_type):
             "PPHGNetV2_B4_Formula",
             "PPHGNetV2_B6_Formula",
             "Vary_VIT_B_Formula",
+            "HME_SHViT",
+            "HME_SHViT_Tiny",
+            "HME_SHViT_Small",
+            "HME_SHViT_Base",
         ]
     elif model_type == "e2e":
         from .e2e_resnet_vd_pg import ResNet
