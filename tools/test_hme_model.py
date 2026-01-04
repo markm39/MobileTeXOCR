@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import paddle
 import numpy as np
-from PIL import Image
 
 
 def load_vocab(dict_path):
@@ -30,23 +29,46 @@ def load_vocab(dict_path):
 
 
 def preprocess_image(image_path, target_height=32):
-    """Load and preprocess image for inference."""
-    img = Image.open(image_path).convert("L")  # grayscale
+    """Load and preprocess image using ppocr transforms."""
+    import cv2
+    from ppocr.data.imaug import create_operators, transform
+
+    # Define transforms matching training config
+    transforms_config = [
+        {'DecodeImage': {'channel_first': False}},
+        {'NormalizeImage': {'mean': [0, 0, 0], 'std': [1, 1, 1], 'order': 'hwc'}},
+        {'GrayImageChannelFormat': {'inverse': True}},
+    ]
+    ops = create_operators(transforms_config)
+
+    # Read image as bytes (what DecodeImage expects)
+    with open(image_path, 'rb') as f:
+        img_bytes = f.read()
+
+    data = {'image': img_bytes}
+
+    # Apply transforms
+    for op in ops:
+        data = op(data)
+
+    img = data['image']  # Now [1, H, W] float32
 
     # Resize maintaining aspect ratio
-    w, h = img.size
+    _, h, w = img.shape
     ratio = target_height / h
-    new_w = int(w * ratio)
-    img = img.resize((new_w, target_height), Image.Resampling.LANCZOS)
+    new_w = max(1, int(w * ratio))
 
-    # Convert to numpy and normalize
-    img = np.array(img, dtype=np.float32)
-    img = (255.0 - img) / 255.0  # Invert and normalize (white bg, black text -> black bg, white text)
+    # Resize using cv2
+    img_resized = cv2.resize(img.transpose(1, 2, 0), (new_w, target_height))
+    if len(img_resized.shape) == 2:
+        img_resized = img_resized[np.newaxis, :, :]
+    else:
+        img_resized = img_resized.transpose(2, 0, 1)
 
-    # Add batch and channel dimensions [1, 1, H, W]
-    img = img[np.newaxis, np.newaxis, :, :]
+    # Add batch dimension [1, 1, H, W]
+    img = img_resized[np.newaxis, :, :, :]
 
-    return img
+    return img.astype(np.float32)
 
 
 def greedy_decode(model, memory, vocab, max_len=256):
