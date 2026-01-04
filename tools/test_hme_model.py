@@ -124,43 +124,36 @@ def main():
 
     print(f"Vocab size: {len(vocab)}, SOS_IDX: {SOS_IDX}, EOS_IDX: {EOS_IDX}")
 
-    # Autoregressive decoding
-    decoded_tokens = [SOS_IDX]
+    # Try teacher forcing style - feed dummy labels and get all predictions at once
+    # This is how evaluation works during training
+    dummy_labels = paddle.zeros([1, max_len], dtype='int64')
 
     with paddle.no_grad():
-        for step in range(max_len - 1):
-            # Pad tokens to max_len
-            padded_tokens = decoded_tokens + [0] * (max_len - len(decoded_tokens))
-            labels = paddle.to_tensor([padded_tokens], dtype='int64')
+        output = model((image_tensor, mask, dummy_labels))
 
-            # Forward pass
-            output = model((image_tensor, mask, labels))
+        if isinstance(output, dict):
+            output = output.get('head_out', output)
+        if isinstance(output, tuple):
+            output = output[0]  # Get logits
 
-            if isinstance(output, dict):
-                output = output.get('head_out', output)
-            if isinstance(output, tuple):
-                output = output[0]  # Get logits
+    # Get predictions for all positions
+    preds = paddle.argmax(output, axis=-1).numpy()[0]
 
-            # Get prediction for current position
-            # Position len(decoded_tokens)-1 predicts the next token
-            current_pos = len(decoded_tokens) - 1
-            next_token_logits = output[0, current_pos, :]
-            next_token = int(paddle.argmax(next_token_logits).numpy())
-
-            if next_token == EOS_IDX:
-                print(f"EOS reached at step {step}")
-                break
-
-            decoded_tokens.append(next_token)
-
-            if step < 5:
-                print(f"  Step {step}: predicted token {next_token} = '{vocab[next_token] if next_token < len(vocab) else '?'}'")
+    # Find EOS
+    decoded_tokens = []
+    for i, token in enumerate(preds):
+        if token == EOS_IDX:
+            print(f"EOS found at position {i}")
+            break
+        decoded_tokens.append(token)
+        if i < 10:
+            print(f"  Position {i}: token {token} = '{vocab[token] if token < len(vocab) else '?'}'")
 
     print(f"\nDecoded {len(decoded_tokens)} tokens")
 
-    # Convert to LaTeX (skip SOS)
+    # Convert to LaTeX
     latex_tokens = []
-    for idx in decoded_tokens[1:]:  # Skip SOS
+    for idx in decoded_tokens:
         if idx < len(vocab):
             latex_tokens.append(vocab[idx])
         else:
