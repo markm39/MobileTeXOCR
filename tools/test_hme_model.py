@@ -12,95 +12,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import paddle
 import numpy as np
-
-
-def load_vocab(dict_path):
-    """Load vocabulary from dictionary file."""
-    vocab = {}
-    with open(dict_path, 'r', encoding='utf-8') as f:
-        for idx, line in enumerate(f):
-            token = line.strip()
-            vocab[idx] = token
-    # Add special tokens
-    vocab[0] = '<pad>'
-    vocab[1] = '<sos>'
-    vocab[2] = '<eos>'
-    return vocab
-
-
-def preprocess_image(image_path, target_height=32):
-    """Load and preprocess image using ppocr transforms."""
-    import cv2
-    from ppocr.data.imaug import create_operators, transform
-
-    # Define transforms matching training config
-    transforms_config = [
-        {'DecodeImage': {'channel_first': False}},
-        {'NormalizeImage': {'mean': [0, 0, 0], 'std': [1, 1, 1], 'order': 'hwc'}},
-        {'GrayImageChannelFormat': {'inverse': True}},
-    ]
-    ops = create_operators(transforms_config)
-
-    # Read image as bytes (what DecodeImage expects)
-    with open(image_path, 'rb') as f:
-        img_bytes = f.read()
-
-    data = {'image': img_bytes}
-
-    # Apply transforms
-    for op in ops:
-        data = op(data)
-
-    img = data['image']  # Now [1, H, W] float32
-
-    # Resize maintaining aspect ratio
-    _, h, w = img.shape
-    ratio = target_height / h
-    new_w = max(1, int(w * ratio))
-
-    # Resize using cv2
-    img_resized = cv2.resize(img.transpose(1, 2, 0), (new_w, target_height))
-    if len(img_resized.shape) == 2:
-        img_resized = img_resized[np.newaxis, :, :]
-    else:
-        img_resized = img_resized.transpose(2, 0, 1)
-
-    # Add batch dimension [1, 1, H, W]
-    img = img_resized[np.newaxis, :, :, :]
-
-    return img.astype(np.float32)
-
-
-def greedy_decode(model, memory, vocab, max_len=256):
-    """Greedy decoding from encoder memory."""
-    B = memory.shape[0]
-
-    # Start with SOS token
-    SOS_IDX = 1
-    EOS_IDX = 2
-
-    ys = paddle.full([B, 1], SOS_IDX, dtype='int64')
-
-    for i in range(max_len - 1):
-        # This would require the decoder to be exported separately
-        # For now, just return the memory
-        pass
-
-    return ys
+import yaml
 
 
 def main():
     parser = argparse.ArgumentParser(description='Test HME model on an image')
     parser.add_argument('--image', '-i', type=str, required=True, help='Path to input image')
-    parser.add_argument('--model', '-m', type=str,
-                        default='./inference/hme_ultralight/inference',
-                        help='Path to exported model (without extension)')
-    parser.add_argument('--dict', '-d', type=str,
-                        default='./ppocr/utils/dict/latex_symbol_dict.txt',
-                        help='Path to vocabulary dictionary')
     parser.add_argument('--checkpoint', '-c', type=str,
-                        default=None,
-                        help='Path to checkpoint (use dynamic model instead of exported)')
+                        default='./output/rec/hme_ultralight/best_accuracy',
+                        help='Path to checkpoint')
+    parser.add_argument('--config', type=str,
+                        default='./configs/rec/hme_latex_ocr_ultralight.yml',
+                        help='Path to config file')
     args = parser.parse_args()
 
     # Check if image exists
@@ -108,118 +31,139 @@ def main():
         print(f"Error: Image not found: {args.image}")
         sys.exit(1)
 
-    # Load vocabulary
-    if os.path.exists(args.dict):
-        vocab = load_vocab(args.dict)
-        print(f"Loaded vocabulary with {len(vocab)} tokens")
-    else:
-        print(f"Warning: Dictionary not found: {args.dict}")
-        vocab = None
+    # Load config
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
 
-    # Preprocess image
+    # Set pretrained model path
+    config['Global']['pretrained_model'] = args.checkpoint
+
+    # Import ppocr modules
+    from ppocr.modeling.architectures import build_model
+    from ppocr.utils.save_load import load_model
+    from ppocr.data.imaug import create_operators, transform
+    from ppocr.postprocess import build_post_process
+
+    print(f"Loading checkpoint: {args.checkpoint}")
+
+    # Build model
+    model = build_model(config['Architecture'])
+    load_model(config, model, model_type='rec')
+    model.eval()
+
+    # Build postprocessor
+    post_process = build_post_process(config['PostProcess'], config['Global'])
+
+    # Load and preprocess image
     print(f"Loading image: {args.image}")
-    img = preprocess_image(args.image)
-    print(f"Preprocessed image shape: {img.shape}")
 
-    # Load model
-    if args.checkpoint:
-        # Use dynamic model with checkpoint
-        print(f"Loading checkpoint: {args.checkpoint}")
-        from ppocr.modeling.architectures import build_model
-        from ppocr.utils.save_load import load_model
-        import yaml
+    # Use eval transforms from config
+    eval_transforms = config['Eval']['dataset']['transforms']
+    ops = create_operators(eval_transforms, config['Global'])
 
-        config_path = './configs/rec/hme_latex_ocr_ultralight.yml'
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
+    # Read image as bytes
+    with open(args.image, 'rb') as f:
+        img_bytes = f.read()
 
-        # Set the pretrained model path in config
-        config['Global']['pretrained_model'] = args.checkpoint
+    data = {'image': img_bytes, 'label': ''}  # Empty label for inference
 
-        model = build_model(config['Architecture'])
-        load_model(config, model, model_type='rec')
-        model.eval()
-
-        input_tensor = paddle.to_tensor(img)
-
-        # Create mask (all ones = all valid)
-        mask = paddle.ones([1, 1, img.shape[2], img.shape[3]], dtype='float32')
-
-        # Autoregressive decoding
-        SOS_IDX = 1
-        EOS_IDX = 2
-        max_len = 256
-
-        # Start with SOS token
-        decoded_tokens = [SOS_IDX]
-
-        with paddle.no_grad():
-            for step in range(max_len - 1):
-                # Create label tensor with decoded tokens so far
-                labels = paddle.to_tensor([decoded_tokens + [0] * (max_len - len(decoded_tokens))], dtype='int64')
-
-                output = model((input_tensor, mask, labels))
-
-                if isinstance(output, dict):
-                    output = output.get('head_out', output)
-                if isinstance(output, tuple):
-                    output = output[0]
-
-                # Get prediction for next token (at position len(decoded_tokens)-1)
-                next_token_logits = output[0, len(decoded_tokens) - 1, :]
-                next_token = int(paddle.argmax(next_token_logits).numpy())
-
-                if next_token == EOS_IDX:
-                    break
-
-                decoded_tokens.append(next_token)
-
-        print(f"Decoded {len(decoded_tokens)} tokens")
-
-        # Skip SOS token for output
-        preds = decoded_tokens[1:]
-
-    else:
-        # Use exported static model
-        print(f"Loading exported model: {args.model}")
-        if not os.path.exists(args.model + '.pdmodel'):
-            print(f"Error: Model not found: {args.model}.pdmodel")
-            print("Make sure you've exported the model first.")
+    # Apply transforms
+    for op in ops:
+        data = op(data)
+        if data is None:
+            print("Error: Transform returned None")
             sys.exit(1)
 
-        model = paddle.jit.load(args.model)
+    # data is now a list: [image, label]
+    image = data[0]
+    label = data[1]
 
-        input_tensor = paddle.to_tensor(img)
+    print(f"Preprocessed image shape: {image.shape}")
 
-        with paddle.no_grad():
-            output = model(input_tensor)
+    # Create batch with mask
+    # Image is [1, H, W], need to add batch dim
+    if len(image.shape) == 3:
+        image = image[np.newaxis, :, :, :]  # [1, 1, H, W]
 
-        print(f"Output shape: {output.shape}")
-        print(f"Output type: {type(output)}")
+    image_tensor = paddle.to_tensor(image.astype(np.float32))
+    mask = paddle.ones([1, 1, image.shape[2], image.shape[3]], dtype='float32')
 
-        # The exported model returns encoder memory, not decoded tokens
-        # Full decoding would require implementing the decode loop here
-        print("\nNote: Exported model returns encoder features.")
-        print("For full LaTeX output, use --checkpoint with the dynamic model.")
-        return
+    # For inference, we need to do autoregressive decoding
+    # The model expects (image, mask, labels) tuple for teacher forcing
+    # For true inference, we need to generate tokens one by one
 
-    # Convert predictions to LaTeX
-    if vocab:
-        latex_tokens = []
-        for idx in preds:
-            if idx == 2:  # EOS
+    # Get vocab info
+    dict_path = config['Global']['character_dict_path']
+    with open(dict_path, 'r') as f:
+        vocab = [line.strip() for line in f]
+
+    # 'eos' is at index 0, 'sos' is at index 1 in the vocab file
+    EOS_IDX = 0
+    SOS_IDX = 1 if len(vocab) > 1 and vocab[1] == 'sos' else 0
+    max_len = config['Global'].get('max_text_length', 256)
+
+    print(f"Vocab size: {len(vocab)}, SOS_IDX: {SOS_IDX}, EOS_IDX: {EOS_IDX}")
+
+    # Autoregressive decoding
+    decoded_tokens = [SOS_IDX]
+
+    with paddle.no_grad():
+        for step in range(max_len - 1):
+            # Pad tokens to max_len
+            padded_tokens = decoded_tokens + [0] * (max_len - len(decoded_tokens))
+            labels = paddle.to_tensor([padded_tokens], dtype='int64')
+
+            # Forward pass
+            output = model((image_tensor, mask, labels))
+
+            if isinstance(output, dict):
+                output = output.get('head_out', output)
+            if isinstance(output, tuple):
+                output = output[0]  # Get logits
+
+            # Get prediction for current position
+            # Position len(decoded_tokens)-1 predicts the next token
+            current_pos = len(decoded_tokens) - 1
+            next_token_logits = output[0, current_pos, :]
+            next_token = int(paddle.argmax(next_token_logits).numpy())
+
+            if next_token == EOS_IDX:
+                print(f"EOS reached at step {step}")
                 break
-            if idx == 0:  # PAD
-                continue
-            if idx == 1:  # SOS
-                continue
-            token = vocab.get(idx, f'<unk:{idx}>')
-            latex_tokens.append(token)
 
-        latex = ' '.join(latex_tokens)
-        print(f"\nPredicted LaTeX: {latex}")
-    else:
-        print(f"\nPredicted token indices: {preds[:50]}...")  # First 50
+            decoded_tokens.append(next_token)
+
+            if step < 5:
+                print(f"  Step {step}: predicted token {next_token} = '{vocab[next_token] if next_token < len(vocab) else '?'}'")
+
+    print(f"\nDecoded {len(decoded_tokens)} tokens")
+
+    # Convert to LaTeX (skip SOS)
+    latex_tokens = []
+    for idx in decoded_tokens[1:]:  # Skip SOS
+        if idx < len(vocab):
+            latex_tokens.append(vocab[idx])
+        else:
+            latex_tokens.append(f'<unk:{idx}>')
+
+    latex = ' '.join(latex_tokens)
+    print(f"\nPredicted LaTeX: {latex}")
+
+    # Also show ground truth if available
+    label_file = args.image.replace('/images/', '/').replace('.jpg', '').replace('.png', '').replace('.bmp', '')
+    # Try to find the label
+    eval_label_path = config['Eval']['dataset']['label_file_list'][0]
+    image_name = os.path.basename(args.image)
+    try:
+        with open(eval_label_path, 'r') as f:
+            for line in f:
+                if image_name in line:
+                    parts = line.strip().split('\t')
+                    if len(parts) >= 2:
+                        print(f"\nGround Truth: {parts[1]}")
+                    break
+    except:
+        pass
 
 
 if __name__ == '__main__':
