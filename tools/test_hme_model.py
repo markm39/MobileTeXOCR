@@ -120,23 +120,42 @@ def main():
 
         input_tensor = paddle.to_tensor(img)
 
-        # For dynamic model, we need to pass the full tuple
-        # Create dummy mask and labels for inference
+        # Create mask (all ones = all valid)
         mask = paddle.ones([1, 1, img.shape[2], img.shape[3]], dtype='float32')
-        labels = paddle.zeros([1, 256], dtype='int64')
+
+        # Autoregressive decoding
+        SOS_IDX = 1
+        EOS_IDX = 2
+        max_len = 256
+
+        # Start with SOS token
+        decoded_tokens = [SOS_IDX]
 
         with paddle.no_grad():
-            output = model((input_tensor, mask, labels))
+            for step in range(max_len - 1):
+                # Create label tensor with decoded tokens so far
+                labels = paddle.to_tensor([decoded_tokens + [0] * (max_len - len(decoded_tokens))], dtype='int64')
 
-        if isinstance(output, dict):
-            output = output.get('head_out', output)
-        if isinstance(output, tuple):
-            output = output[0]
+                output = model((input_tensor, mask, labels))
 
-        print(f"Output shape: {output.shape}")
+                if isinstance(output, dict):
+                    output = output.get('head_out', output)
+                if isinstance(output, tuple):
+                    output = output[0]
 
-        # Decode predictions
-        preds = paddle.argmax(output, axis=-1).numpy()[0]
+                # Get prediction for next token (at position len(decoded_tokens)-1)
+                next_token_logits = output[0, len(decoded_tokens) - 1, :]
+                next_token = int(paddle.argmax(next_token_logits).numpy())
+
+                if next_token == EOS_IDX:
+                    break
+
+                decoded_tokens.append(next_token)
+
+        print(f"Decoded {len(decoded_tokens)} tokens")
+
+        # Skip SOS token for output
+        preds = decoded_tokens[1:]
 
     else:
         # Use exported static model
