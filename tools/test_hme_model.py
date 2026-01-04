@@ -111,6 +111,9 @@ def main():
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
 
+        # Set the pretrained model path in config
+        config['Global']['pretrained_model'] = args.checkpoint
+
         model = build_model(config['Architecture'])
         load_model(config, model, model_type='rec')
         model.eval()
