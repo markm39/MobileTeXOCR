@@ -80,6 +80,26 @@ def main():
 
     print(f"Preprocessed image shape: {image.shape}")
 
+    # Resize to height=32 maintaining aspect ratio
+    import cv2
+    target_height = 32
+    if len(image.shape) == 3:
+        c, h, w = image.shape
+        ratio = target_height / h
+        new_w = max(1, int(w * ratio))
+        # Transpose to HWC for cv2
+        img_hwc = image.transpose(1, 2, 0) if c == 1 else image.transpose(1, 2, 0)
+        if img_hwc.shape[-1] == 1:
+            img_hwc = img_hwc.squeeze(-1)
+        img_resized = cv2.resize(img_hwc.astype(np.float32), (new_w, target_height))
+        if len(img_resized.shape) == 2:
+            img_resized = img_resized[np.newaxis, :, :]
+        else:
+            img_resized = img_resized.transpose(2, 0, 1)
+        image = img_resized
+
+    print(f"Resized image shape: {image.shape}")
+
     # Create batch with mask
     # Image is [1, H, W], need to add batch dim
     if len(image.shape) == 3:
