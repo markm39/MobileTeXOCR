@@ -389,6 +389,8 @@ class CANMetricV2(object):
                         break
                     if idx == 1:  # SOS
                         continue
+                    if idx < 0:  # Skip negative indices
+                        continue
                     if idx < len(self._vocab):
                         symbols.append(self._vocab[idx])
                 decoded_preds.append(' '.join(symbols))
@@ -419,6 +421,8 @@ class CANMetricV2(object):
                 if idx == 0:  # EOS
                     break
                 if idx == 1:  # SOS - skip
+                    continue
+                if idx < 0:  # IGNORE_INDEX (-100) or other negative values
                     continue
                 if idx < len(self._vocab):
                     target_symbols.append(self._vocab[idx])
