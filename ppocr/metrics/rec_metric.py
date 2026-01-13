@@ -334,93 +334,74 @@ class CANMetricV2(object):
             if epoch_reset:
                 self.epoch_reset()
 
-        # Handle dict output from HMEHeadV2
-        if isinstance(preds, dict):
-            logits = preds['logits']
-        else:
-            logits = preds
+        # preds is post-processed: list of [text, probs] pairs from CANLabelDecodeV2
+        # batch is numpy: (images, image_masks, decoder_inputs, decoder_targets, label_masks)
 
         # Get targets from batch (DyMaskCollatorV2 format)
-        # batch = (images, image_masks, decoder_inputs, decoder_targets, label_masks)
         decoder_targets = batch[3]  # [B, L]
         label_masks = batch[4]  # [B, L]
 
-        # Get predictions
-        word_pred = logits.argmax(axis=2)  # [B, L]
-
-        # Convert to numpy
-        if hasattr(word_pred, 'cpu'):
-            word_pred = word_pred.cpu().detach().numpy()
-        elif hasattr(word_pred, 'numpy'):
-            word_pred = word_pred.numpy()
-
-        if hasattr(decoder_targets, 'cpu'):
-            word_label = decoder_targets.cpu().detach().numpy()
-        elif hasattr(decoder_targets, 'numpy'):
-            word_label = decoder_targets.numpy()
-        else:
-            word_label = decoder_targets
-
-        if hasattr(label_masks, 'cpu'):
-            word_label_mask = label_masks.cpu().detach().numpy()
-        elif hasattr(label_masks, 'numpy'):
-            word_label_mask = label_masks.numpy()
-        else:
-            word_label_mask = label_masks
+        # Load vocabulary for decoding targets
+        if not hasattr(self, '_vocab'):
+            # Build vocab on first call - EOS=0, SOS=1, then symbols
+            self._vocab = ['<eos>', '<sos>']
+            try:
+                import os
+                dict_path = 'ppocr/utils/dict/latex_symbol_dict.txt'
+                if os.path.exists(dict_path):
+                    with open(dict_path, 'r') as f:
+                        for line in f:
+                            self._vocab.append(line.strip())
+            except:
+                pass
 
         word_scores = []
         line_right = 0
-        batch_size = word_label.shape[0]
+        batch_size = len(preds)
 
         for i in range(batch_size):
-            target = word_label[i]
-            pred = word_pred[i]
-            mask = word_label_mask[i]
+            # Get predicted text from postprocessor output
+            pred_text = preds[i][0] if isinstance(preds[i], (list, tuple)) else str(preds[i])
 
-            # Get sequence length from mask
-            seq_len = int(np.sum(mask))
+            # Decode target tokens to text
+            target_tokens = decoder_targets[i]
+            mask = label_masks[i]
+            seq_len = int(np.sum(mask)) if hasattr(mask, '__len__') else len(target_tokens)
 
-            if seq_len == 0:
-                # Empty sequence
+            # Convert target indices to text
+            target_symbols = []
+            for j in range(seq_len):
+                idx = int(target_tokens[j])
+                if idx == 0:  # EOS
+                    break
+                if idx == 1:  # SOS - skip
+                    continue
+                if idx < len(self._vocab):
+                    target_symbols.append(self._vocab[idx])
+            target_text = ' '.join(target_symbols)
+
+            # Compare predicted text with target text
+            if len(target_text) == 0 and len(pred_text) == 0:
+                # Both empty = match
                 word_scores.append(1.0)
                 line_right += 1
-                continue
-
-            # Get valid portions
-            target_seq = target[:seq_len]
-            pred_seq = pred[:seq_len]
-
-            # Compute token-level accuracy
-            correct = np.sum(target_seq == pred_seq)
-            word_scores.append(correct / seq_len)
-
-            # Check exact match (truncate at first EOS in prediction)
-            # Find first EOS in prediction
-            eos_positions = np.where(pred_seq == self.EOS_IDX)[0]
-            if len(eos_positions) > 0:
-                pred_end = eos_positions[0]
+            elif len(target_text) == 0 or len(pred_text) == 0:
+                # One empty, one not = no match
+                word_scores.append(0.0)
             else:
-                pred_end = seq_len
+                # Compute similarity using SequenceMatcher
+                ratio = SequenceMatcher(None, target_text, pred_text, autojunk=False).ratio()
+                word_scores.append(ratio)
 
-            # Find first EOS in target
-            target_eos_positions = np.where(target_seq == self.EOS_IDX)[0]
-            if len(target_eos_positions) > 0:
-                target_end = target_eos_positions[0] + 1  # Include EOS
-            else:
-                target_end = seq_len
+                # Check exact match
+                if pred_text.strip() == target_text.strip():
+                    line_right += 1
 
-            # Compare sequences
-            pred_final = pred[:pred_end + 1] if pred_end < seq_len else pred[:seq_len]
-            target_final = target[:target_end]
-
-            if np.array_equal(pred_final, target_final):
-                line_right += 1
-
-        self.word_rate = np.mean(word_scores)
-        self.exp_rate = line_right / batch_size
+        self.word_rate = np.mean(word_scores) if word_scores else 0.0
+        self.exp_rate = line_right / batch_size if batch_size > 0 else 0.0
 
         exp_length = batch_size
-        word_length = word_label.shape[1]
+        word_length = batch_size  # Use batch_size as proxy for word_length
 
         self.word_right.append(self.word_rate * word_length)
         self.exp_right.append(self.exp_rate * exp_length)
