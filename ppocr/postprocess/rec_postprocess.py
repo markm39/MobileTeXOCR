@@ -1284,15 +1284,9 @@ class CANLabelDecodeV2(BaseRecLabelDecode):
         # Decode predictions
         text = self.decode(preds_idx, preds_max)
 
-        if label is None:
-            return text
-
-        # Decode labels if provided
-        if hasattr(label, 'numpy'):
-            label = label.numpy()
-        label_text = self.decode(label)
-
-        return text, label_text
+        # Always return just predictions - CANMetricV2 handles label comparison
+        # The ppocr framework passes batch[1] as label which is image_masks in V2 format
+        return text
 
 
 class CPPDLabelDecode(NRTRLabelDecode):
