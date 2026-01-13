@@ -339,8 +339,21 @@ class HMELossV2(nn.Layer):
 
         # Get targets from batch (DyMaskCollatorV2 format)
         # batch = (images, image_masks, decoder_inputs, decoder_targets, label_masks)
-        decoder_targets = batch[3]  # [B, L]
-        label_masks = batch[4]  # [B, L]
+        decoder_targets = batch[3]  # [B, L_target]
+        label_masks = batch[4]  # [B, L_target]
+
+        # Handle shape mismatch between model output and targets
+        # Model outputs [B, max_len, V] but collator pads to [B, max_in_batch]
+        B, L_logits, V = logits.shape
+        L_target = decoder_targets.shape[1]
+
+        if L_logits > L_target:
+            # Truncate logits to match target length
+            logits = logits[:, :L_target, :]
+        elif L_target > L_logits:
+            # Truncate targets to match logits length
+            decoder_targets = decoder_targets[:, :L_logits]
+            label_masks = label_masks[:, :L_logits]
 
         # Flatten for cross entropy
         B, L, V = logits.shape
