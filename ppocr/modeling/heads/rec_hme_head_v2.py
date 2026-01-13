@@ -861,6 +861,7 @@ class HMEHeadV2(nn.Layer):
         self.d_model = d_model
         self.vocab_size = vocab_size
         self.max_len = max_len
+        self.use_moe = use_moe
         self.use_mamba = use_mamba
         self.use_path = use_path
 
@@ -1031,10 +1032,13 @@ class HMEHeadV2(nn.Layer):
             out = self.norm(out)
             logits = self.proj(out)  # [B, L, vocab_size]
 
-            # Collect auxiliary losses from MoE layers
-            aux_loss = 0.0
-            for layer in self.layers:
-                aux_loss = aux_loss + layer.get_aux_loss()
+            # Collect auxiliary losses from MoE layers (only if MoE enabled)
+            if self.use_moe:
+                aux_loss = 0.0
+                for layer in self.layers:
+                    aux_loss = aux_loss + layer.get_aux_loss()
+            else:
+                aux_loss = 0.0
 
             return {'logits': logits, 'aux_loss': aux_loss}
         else:

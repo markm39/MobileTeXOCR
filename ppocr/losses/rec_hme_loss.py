@@ -392,6 +392,10 @@ class HMELossV2(nn.Layer):
         if isinstance(aux_loss, (int, float)):
             aux_loss = paddle.to_tensor(aux_loss, dtype='float32')
 
+        # NaN protection: if aux_loss is NaN, replace with 0
+        if paddle.isnan(aux_loss).any():
+            aux_loss = paddle.to_tensor(0.0, dtype='float32')
+
         total_loss = loss_ce + self.aux_loss_weight * aux_loss
 
         return {
