@@ -160,16 +160,18 @@ def main():
             logger.info("{}:{}".format(k, v))
 
     # start eval
+    algorithm = config["Architecture"].get("algorithm", None)
     metric = program.eval(
         model,
         valid_dataloader,
         post_process_class,
         eval_class,
         model_type,
-        extra_input,
-        scaler,
-        amp_level,
-        amp_custom_black_list,
+        algorithm=algorithm,
+        extra_input=extra_input,
+        scaler=scaler,
+        amp_level=amp_level,
+        amp_custom_black_list=amp_custom_black_list,
     )
     logger.info("metric eval ***************")
     for k, v in metric.items():
