@@ -423,7 +423,7 @@ def train(
                 elif model_type in ["table"]:
                     post_result = post_process_class(preds, batch)
                     eval_class(post_result, batch)
-                elif algorithm in ["CAN", "HME"]:
+                elif algorithm in ["CAN", "HME", "HMEV2"]:
                     model_type = "can"
                     eval_class(preds[0], batch[2:], epoch_reset=(idx == 0))
                 elif algorithm in ["LaTeXOCR"]:
@@ -768,7 +768,7 @@ def eval(
                     eval_class(post_result, batch_numpy)
             elif model_type in ["sr"]:
                 eval_class(preds, batch_numpy)
-            elif model_type in ["can", "hme"]:
+            elif model_type in ["can", "hme"] or algorithm in ["HMEV2"]:
                 eval_class(preds[0], batch_numpy[2:], epoch_reset=(idx == 0))
             elif model_type in ["latexocr", "unimernet", "pp_formulanet"]:
                 post_result = post_process_class(preds, batch[1], "eval")

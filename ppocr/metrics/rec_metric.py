@@ -334,16 +334,26 @@ class CANMetricV2(object):
             if epoch_reset:
                 self.epoch_reset()
 
-        # preds is post-processed: list of [text, probs] pairs from CANLabelDecodeV2
-        # batch is numpy: (images, image_masks, decoder_inputs, decoder_targets, label_masks)
+        # Handle two possible input formats:
+        # 1. preds = raw logits [B, L, V], batch = batch[2:] = (decoder_inputs, decoder_targets, label_masks)
+        # 2. preds = post-processed [(text, probs), ...], batch = full batch
 
-        # Get targets from batch (DyMaskCollatorV2 format)
-        decoder_targets = batch[3]  # [B, L]
-        label_masks = batch[4]  # [B, L]
+        # Determine format based on batch length
+        if len(batch) == 3:
+            # Sliced batch: (decoder_inputs, decoder_targets, label_masks)
+            decoder_targets = batch[1]
+            label_masks = batch[2]
+        elif len(batch) >= 5:
+            # Full batch: (images, image_masks, decoder_inputs, decoder_targets, label_masks)
+            decoder_targets = batch[3]
+            label_masks = batch[4]
+        else:
+            # Fallback - assume last two are targets and masks
+            decoder_targets = batch[-2]
+            label_masks = batch[-1]
 
-        # Load vocabulary for decoding targets
+        # Load vocabulary for decoding
         if not hasattr(self, '_vocab'):
-            # Build vocab on first call - EOS=0, SOS=1, then symbols
             self._vocab = ['<eos>', '<sos>']
             try:
                 import os
@@ -355,13 +365,45 @@ class CANMetricV2(object):
             except:
                 pass
 
+        # Convert paddle tensor to numpy if needed
+        if hasattr(preds, 'numpy'):
+            preds = preds.numpy()
+
+        # Handle raw logits vs post-processed text
+        # Raw logits: ndarray with shape [B, L, V] or [B, L]
+        # Post-processed: list of [(text, probs), ...]
+        if hasattr(preds, 'shape') and len(preds.shape) >= 2:
+            # Raw logits - decode to token indices
+            if len(preds.shape) == 3:
+                pred_indices = preds.argmax(axis=2)  # [B, L]
+            else:
+                pred_indices = preds  # Already token indices [B, L]
+
+            # Decode predictions to text
+            decoded_preds = []
+            for b in range(pred_indices.shape[0]):
+                symbols = []
+                for idx in pred_indices[b]:
+                    idx = int(idx)
+                    if idx == 0:  # EOS
+                        break
+                    if idx == 1:  # SOS
+                        continue
+                    if idx < len(self._vocab):
+                        symbols.append(self._vocab[idx])
+                decoded_preds.append(' '.join(symbols))
+            preds = decoded_preds
+
         word_scores = []
         line_right = 0
         batch_size = len(preds)
 
         for i in range(batch_size):
-            # Get predicted text from postprocessor output
-            pred_text = preds[i][0] if isinstance(preds[i], (list, tuple)) else str(preds[i])
+            # Get predicted text
+            if isinstance(preds[i], (list, tuple)):
+                pred_text = preds[i][0]
+            else:
+                pred_text = str(preds[i])
 
             # Decode target tokens to text
             target_tokens = decoder_targets[i]
