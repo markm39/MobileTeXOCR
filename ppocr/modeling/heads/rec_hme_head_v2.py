@@ -865,6 +865,9 @@ class HMEHeadV2(nn.Layer):
         self.use_mamba = use_mamba
         self.use_path = use_path
 
+        # Debug: verify use_moe is being passed correctly
+        print(f"[HMEHeadV2] use_moe={use_moe}, use_mamba={use_mamba}, attention_type={attention_type}")
+
         # Feature projection
         if in_channels != d_model:
             self.feature_proj = nn.Conv2D(in_channels, d_model, kernel_size=1)
@@ -1039,6 +1042,11 @@ class HMEHeadV2(nn.Layer):
                     aux_loss = aux_loss + layer.get_aux_loss()
             else:
                 aux_loss = 0.0
+
+            # Debug: verify aux_loss computation (only print first batch)
+            if not hasattr(self, '_aux_debug_printed'):
+                print(f"[HMEHeadV2.forward] use_moe={self.use_moe}, aux_loss={aux_loss}")
+                self._aux_debug_printed = True
 
             return {'logits': logits, 'aux_loss': aux_loss}
         else:
