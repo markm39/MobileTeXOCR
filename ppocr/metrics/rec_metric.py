@@ -299,3 +299,155 @@ class LaTeXOCRMetric(object):
         self.e3_right = []
         self.editdistance_total_length = 0
         self.exp_total_num = 0
+
+
+class CANMetricV2(object):
+    """
+    Metric for HMEHeadV2 with shifted labels.
+
+    Expects:
+        - preds: dict with 'logits' [B, L, vocab_size]
+        - batch: (images, image_masks, decoder_inputs, decoder_targets, label_masks)
+
+    Computes:
+        - word_rate: Average token-level accuracy
+        - exp_rate: Expression-level accuracy (exact match)
+    """
+
+    IGNORE_INDEX = -100
+    EOS_IDX = 0
+
+    def __init__(self, main_indicator="exp_rate", **kwargs):
+        self.main_indicator = main_indicator
+        self.word_right = []
+        self.exp_right = []
+        self.word_total_length = 0
+        self.exp_total_num = 0
+        self.word_rate = 0
+        self.exp_rate = 0
+        self.reset()
+        self.epoch_reset()
+
+    def __call__(self, preds, batch, **kwargs):
+        for k, v in kwargs.items():
+            epoch_reset = v
+            if epoch_reset:
+                self.epoch_reset()
+
+        # Handle dict output from HMEHeadV2
+        if isinstance(preds, dict):
+            logits = preds['logits']
+        else:
+            logits = preds
+
+        # Get targets from batch (DyMaskCollatorV2 format)
+        # batch = (images, image_masks, decoder_inputs, decoder_targets, label_masks)
+        decoder_targets = batch[3]  # [B, L]
+        label_masks = batch[4]  # [B, L]
+
+        # Get predictions
+        word_pred = logits.argmax(axis=2)  # [B, L]
+
+        # Convert to numpy
+        if hasattr(word_pred, 'cpu'):
+            word_pred = word_pred.cpu().detach().numpy()
+        elif hasattr(word_pred, 'numpy'):
+            word_pred = word_pred.numpy()
+
+        if hasattr(decoder_targets, 'cpu'):
+            word_label = decoder_targets.cpu().detach().numpy()
+        elif hasattr(decoder_targets, 'numpy'):
+            word_label = decoder_targets.numpy()
+        else:
+            word_label = decoder_targets
+
+        if hasattr(label_masks, 'cpu'):
+            word_label_mask = label_masks.cpu().detach().numpy()
+        elif hasattr(label_masks, 'numpy'):
+            word_label_mask = label_masks.numpy()
+        else:
+            word_label_mask = label_masks
+
+        word_scores = []
+        line_right = 0
+        batch_size = word_label.shape[0]
+
+        for i in range(batch_size):
+            target = word_label[i]
+            pred = word_pred[i]
+            mask = word_label_mask[i]
+
+            # Get sequence length from mask
+            seq_len = int(np.sum(mask))
+
+            if seq_len == 0:
+                # Empty sequence
+                word_scores.append(1.0)
+                line_right += 1
+                continue
+
+            # Get valid portions
+            target_seq = target[:seq_len]
+            pred_seq = pred[:seq_len]
+
+            # Compute token-level accuracy
+            correct = np.sum(target_seq == pred_seq)
+            word_scores.append(correct / seq_len)
+
+            # Check exact match (truncate at first EOS in prediction)
+            # Find first EOS in prediction
+            eos_positions = np.where(pred_seq == self.EOS_IDX)[0]
+            if len(eos_positions) > 0:
+                pred_end = eos_positions[0]
+            else:
+                pred_end = seq_len
+
+            # Find first EOS in target
+            target_eos_positions = np.where(target_seq == self.EOS_IDX)[0]
+            if len(target_eos_positions) > 0:
+                target_end = target_eos_positions[0] + 1  # Include EOS
+            else:
+                target_end = seq_len
+
+            # Compare sequences
+            pred_final = pred[:pred_end + 1] if pred_end < seq_len else pred[:seq_len]
+            target_final = target[:target_end]
+
+            if np.array_equal(pred_final, target_final):
+                line_right += 1
+
+        self.word_rate = np.mean(word_scores)
+        self.exp_rate = line_right / batch_size
+
+        exp_length = batch_size
+        word_length = word_label.shape[1]
+
+        self.word_right.append(self.word_rate * word_length)
+        self.exp_right.append(self.exp_rate * exp_length)
+        self.word_total_length = self.word_total_length + word_length
+        self.exp_total_num = self.exp_total_num + exp_length
+
+    def get_metric(self):
+        """
+        return {
+            'word_rate': 0,
+            "exp_rate": 0,
+        }
+        """
+        if self.word_total_length == 0:
+            return {"word_rate": 0.0, "exp_rate": 0.0}
+
+        cur_word_rate = sum(self.word_right) / self.word_total_length
+        cur_exp_rate = sum(self.exp_right) / self.exp_total_num
+        self.reset()
+        return {"word_rate": cur_word_rate, "exp_rate": cur_exp_rate}
+
+    def reset(self):
+        self.word_rate = 0
+        self.exp_rate = 0
+
+    def epoch_reset(self):
+        self.word_right = []
+        self.exp_right = []
+        self.word_total_length = 0
+        self.exp_total_num = 0

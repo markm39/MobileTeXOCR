@@ -1191,6 +1191,110 @@ class CANLabelDecode(BaseRecLabelDecode):
         return text, label
 
 
+class CANLabelDecodeV2(BaseRecLabelDecode):
+    """
+    Label decoder for HMEHeadV2 with proper EOS handling.
+
+    Vocabulary layout:
+    - Index 0: 'eos' (End of Sequence)
+    - Index 1: 'sos' (Start of Sequence)
+    - Index 2+: LaTeX symbols
+    """
+
+    EOS_IDX = 0
+    SOS_IDX = 1
+
+    def __init__(self, character_dict_path=None, use_space_char=False, **kwargs):
+        super(CANLabelDecodeV2, self).__init__(character_dict_path, use_space_char)
+
+    def decode(self, text_index, preds_prob=None):
+        """
+        Decode token indices to LaTeX strings.
+
+        Args:
+            text_index: [B, L] token indices
+            preds_prob: [B, L] optional token probabilities
+
+        Returns:
+            list of [text, probs] pairs
+        """
+        result_list = []
+        batch_size = len(text_index)
+
+        for batch_idx in range(batch_size):
+            seq = text_index[batch_idx]
+
+            # Find EOS token to determine sequence end
+            eos_positions = np.where(seq == self.EOS_IDX)[0]
+            if len(eos_positions) > 0:
+                seq_end = eos_positions[0]
+            else:
+                seq_end = len(seq)
+
+            # Extract valid indices (skip SOS if present at start)
+            idx_list = seq[:seq_end].tolist()
+            if len(idx_list) > 0 and idx_list[0] == self.SOS_IDX:
+                idx_list = idx_list[1:]
+
+            # Convert to symbols
+            symbol_list = []
+            for idx in idx_list:
+                if 0 <= idx < len(self.character):
+                    symbol_list.append(self.character[idx])
+
+            # Get probabilities if available
+            probs = []
+            if preds_prob is not None:
+                probs = preds_prob[batch_idx][: len(symbol_list)].tolist()
+
+            # Join symbols with spaces (LaTeX tokens)
+            result_list.append([" ".join(symbol_list), probs])
+
+        return result_list
+
+    def __call__(self, preds, label=None, *args, **kwargs):
+        """
+        Decode model predictions to text.
+
+        Args:
+            preds: Either:
+                - dict with 'logits' key [B, L, vocab_size]
+                - tensor [B, L, vocab_size]
+            label: Optional ground truth labels for decoding
+
+        Returns:
+            list of [text, probs] pairs, or (preds_text, label_text) tuple
+        """
+        # Handle dict output from HMEHeadV2
+        if isinstance(preds, dict):
+            pred_prob = preds['logits']
+        elif isinstance(preds, tuple):
+            pred_prob = preds[0]
+        else:
+            pred_prob = preds
+
+        # Convert to numpy if needed
+        if hasattr(pred_prob, 'numpy'):
+            pred_prob = pred_prob.numpy()
+
+        # Get predictions
+        preds_idx = pred_prob.argmax(axis=2)
+        preds_max = pred_prob.max(axis=2)
+
+        # Decode predictions
+        text = self.decode(preds_idx, preds_max)
+
+        if label is None:
+            return text
+
+        # Decode labels if provided
+        if hasattr(label, 'numpy'):
+            label = label.numpy()
+        label_text = self.decode(label)
+
+        return text, label_text
+
+
 class CPPDLabelDecode(NRTRLabelDecode):
     """Convert between text-label and text-index"""
 

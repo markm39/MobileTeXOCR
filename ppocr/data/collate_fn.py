@@ -118,6 +118,91 @@ class DyMaskCollator(object):
         return images, image_masks, labels, label_masks
 
 
+class DyMaskCollatorV2(object):
+    """
+    Collator for HMEHeadV2 with proper autoregressive label handling.
+
+    Expects each item to have:
+    - item[0]: image (C, H, W)
+    - item[1]: decoder_input [SOS, tok1, tok2, ..., tokN]
+    - item[2]: decoder_target [tok1, tok2, ..., tokN, EOS]
+
+    Returns:
+    - images: [batch_size, channel, maxH, maxW]
+    - image_masks: [batch_size, 1, maxH, maxW]
+    - decoder_inputs: [batch_size, maxLen] - padded with 0 (EOS as padding)
+    - decoder_targets: [batch_size, maxLen] - padded with -100 (ignore index)
+    - label_masks: [batch_size, maxLen] - 1 for valid positions
+    """
+
+    IGNORE_INDEX = -100  # PyTorch/Paddle cross-entropy ignore index
+    PAD_IDX = 0  # EOS token as padding for decoder input
+
+    def __call__(self, batch):
+        import copy
+
+        max_width, max_height, max_length = 0, 0, 0
+        bs, channel = len(batch), batch[0][0].shape[0]
+        proper_items = []
+
+        for item in batch:
+            # Skip items that would create too large a batch
+            if (
+                item[0].shape[1] * max_width > 1600 * 320
+                or item[0].shape[2] * max_height > 1600 * 320
+            ):
+                continue
+            max_height = max(item[0].shape[1], max_height)
+            max_width = max(item[0].shape[2], max_width)
+            max_length = max(len(item[1]), max_length)  # decoder_input length
+            proper_items.append(item)
+
+        if len(proper_items) == 0:
+            # Return empty batch if all items filtered out
+            return None
+
+        # Initialize arrays with deep copies to avoid memory aliasing
+        images = np.zeros(
+            (len(proper_items), channel, max_height, max_width), dtype="float32"
+        )
+        image_masks = np.zeros(
+            (len(proper_items), 1, max_height, max_width), dtype="float32"
+        )
+
+        # Decoder inputs padded with PAD_IDX (EOS)
+        decoder_inputs = np.full(
+            (len(proper_items), max_length), self.PAD_IDX, dtype="int64"
+        )
+
+        # Decoder targets padded with IGNORE_INDEX for loss computation
+        decoder_targets = np.full(
+            (len(proper_items), max_length), self.IGNORE_INDEX, dtype="int64"
+        )
+
+        # Mask for valid positions
+        label_masks = np.zeros((len(proper_items), max_length), dtype="int64")
+
+        for i in range(len(proper_items)):
+            # Copy image
+            _, h, w = proper_items[i][0].shape
+            images[i][:, :h, :w] = copy.deepcopy(proper_items[i][0])
+            image_masks[i][:, :h, :w] = 1
+
+            # Copy decoder_input
+            dec_in = proper_items[i][1]
+            l = len(dec_in)
+            decoder_inputs[i][:l] = copy.deepcopy(np.array(dec_in))
+
+            # Copy decoder_target
+            dec_tgt = proper_items[i][2]
+            decoder_targets[i][:l] = copy.deepcopy(np.array(dec_tgt))
+
+            # Set mask
+            label_masks[i][:l] = 1
+
+        return images, image_masks, decoder_inputs, decoder_targets, label_masks
+
+
 class LaTeXOCRCollator(object):
     """
     batch: [

@@ -1647,6 +1647,80 @@ class CANLabelEncode(BaseRecLabelEncode):
         return data
 
 
+class CANLabelEncodeV2(BaseRecLabelEncode):
+    """
+    Proper autoregressive label encoding for HME.
+
+    Creates shifted labels for proper teacher forcing:
+    - decoder_input:  [SOS, tok1, tok2, ..., tokN] (what the model sees)
+    - decoder_target: [tok1, tok2, ..., tokN, EOS] (what the model predicts)
+
+    Vocabulary layout (latex_symbol_dict.txt):
+    - Index 0: 'eos' (End of Sequence)
+    - Index 1: 'sos' (Start of Sequence)
+    - Index 2+: LaTeX symbols
+    """
+
+    EOS_IDX = 0
+    SOS_IDX = 1
+
+    def __init__(
+        self,
+        character_dict_path,
+        max_text_length=100,
+        use_space_char=False,
+        lower=True,
+        **kwargs,
+    ):
+        super(CANLabelEncodeV2, self).__init__(
+            max_text_length, character_dict_path, use_space_char, lower
+        )
+
+    def encode(self, text_seq):
+        """Encode a sequence of tokens to indices."""
+        text_seq_encoded = []
+        for text in text_seq:
+            if text not in self.character:
+                continue
+            text_seq_encoded.append(self.dict.get(text))
+        if len(text_seq_encoded) == 0:
+            return None
+        return text_seq_encoded
+
+    def __call__(self, data):
+        label = data["label"]
+        if isinstance(label, str):
+            label = label.strip().split()
+
+        # Encode the tokens (without SOS/EOS)
+        encoded = self.encode(label)
+        if encoded is None:
+            return None
+
+        # Check length constraint (need room for SOS and EOS)
+        if len(encoded) > self.max_text_len - 2:
+            return None
+
+        # Create decoder_input: [SOS, tok1, tok2, ..., tokN]
+        decoder_input = [self.SOS_IDX] + encoded
+
+        # Create decoder_target: [tok1, tok2, ..., tokN, EOS]
+        decoder_target = encoded + [self.EOS_IDX]
+
+        # Store sequence length (number of actual tokens including SOS/EOS)
+        seq_len = len(decoder_input)
+
+        # Store in data dict
+        data["decoder_input"] = decoder_input
+        data["decoder_target"] = decoder_target
+        data["length"] = seq_len
+
+        # Keep original label for compatibility
+        data["label"] = encoded
+
+        return data
+
+
 class CPPDLabelEncode(BaseRecLabelEncode):
     """Convert between text-label and text-index"""
 

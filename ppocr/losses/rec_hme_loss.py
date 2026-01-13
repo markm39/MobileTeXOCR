@@ -28,7 +28,7 @@ import paddle
 import paddle.nn as nn
 import paddle.nn.functional as F
 
-__all__ = ["HMELoss"]
+__all__ = ["HMELoss", "HMELossV2"]
 
 
 class SymbolCrossEntropyLoss(nn.Layer):
@@ -285,4 +285,101 @@ class HMELoss(nn.Layer):
 
         loss_dict['loss'] = total_loss
         return loss_dict
+
+
+class HMELossV2(nn.Layer):
+    """
+    Loss for HMEHeadV2 with proper shifted labels.
+
+    Expects:
+        - predicts: dict with 'logits' [B, L, vocab_size] and 'aux_loss'
+        - batch: (images, image_masks, decoder_inputs, decoder_targets, label_masks)
+
+    Uses -100 as ignore_index for padding (standard PyTorch/Paddle convention).
+    """
+
+    IGNORE_INDEX = -100
+
+    def __init__(
+        self,
+        vocab_size=113,
+        label_smoothing=0.0,
+        aux_loss_weight=0.01,
+        **kwargs,
+    ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.label_smoothing = label_smoothing
+        self.aux_loss_weight = aux_loss_weight
+
+    def forward(self, predicts, batch):
+        """
+        Args:
+            predicts: dict with:
+                - 'logits': [B, L, vocab_size]
+                - 'aux_loss': scalar (MoE auxiliary loss)
+            batch: tuple from DyMaskCollatorV2:
+                - images: [B, C, H, W]
+                - image_masks: [B, 1, H, W]
+                - decoder_inputs: [B, L]
+                - decoder_targets: [B, L]
+                - label_masks: [B, L]
+
+        Returns:
+            dict with 'loss', 'loss_ce', 'loss_aux'
+        """
+        # Handle dict output from HMEHeadV2
+        if isinstance(predicts, dict):
+            logits = predicts['logits']
+            aux_loss = predicts.get('aux_loss', 0.0)
+        else:
+            # Fallback for tuple output
+            logits = predicts[0] if isinstance(predicts, tuple) else predicts
+            aux_loss = 0.0
+
+        # Get targets from batch (DyMaskCollatorV2 format)
+        # batch = (images, image_masks, decoder_inputs, decoder_targets, label_masks)
+        decoder_targets = batch[3]  # [B, L]
+        label_masks = batch[4]  # [B, L]
+
+        # Flatten for cross entropy
+        B, L, V = logits.shape
+        logits_flat = logits.reshape([-1, V])  # [B*L, V]
+        targets_flat = decoder_targets.reshape([-1])  # [B*L]
+
+        # Create mask: valid positions where target != IGNORE_INDEX
+        mask = (targets_flat != self.IGNORE_INDEX).astype('float32')
+
+        # Replace IGNORE_INDEX with 0 for cross_entropy computation
+        # (will be masked out anyway)
+        targets_safe = paddle.where(
+            targets_flat == self.IGNORE_INDEX,
+            paddle.zeros_like(targets_flat),
+            targets_flat
+        )
+
+        # Clamp to valid vocab range
+        targets_safe = paddle.clip(targets_safe, min=0, max=self.vocab_size - 1)
+
+        # Compute cross entropy loss
+        if self.label_smoothing > 0:
+            log_probs = F.log_softmax(logits_flat, axis=-1)
+            smooth_target = paddle.full_like(log_probs, self.label_smoothing / (V - 1))
+            target_one_hot = F.one_hot(targets_safe, V).astype('float32')
+            smooth_target = smooth_target * (1 - target_one_hot) + target_one_hot * (1 - self.label_smoothing)
+            loss_ce = -paddle.sum(smooth_target * log_probs, axis=-1)
+        else:
+            loss_ce = F.cross_entropy(logits_flat, targets_safe, reduction='none')
+
+        # Apply mask and average
+        loss_ce = (loss_ce * mask).sum() / (mask.sum() + 1e-8)
+
+        # Total loss with auxiliary MoE loss
+        total_loss = loss_ce + self.aux_loss_weight * aux_loss
+
+        return {
+            'loss': total_loss,
+            'loss_ce': loss_ce,
+            'loss_aux': aux_loss if isinstance(aux_loss, float) else aux_loss.item() if hasattr(aux_loss, 'item') else float(aux_loss),
+        }
 

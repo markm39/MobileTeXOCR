@@ -60,7 +60,7 @@ from .table_postprocess import TableMasterLabelDecode, TableLabelDecode
 from .picodet_postprocess import PicoDetPostProcess
 from .ct_postprocess import CTPostProcess
 from .drrg_postprocess import DRRGPostprocess
-from .rec_postprocess import CANLabelDecode
+from .rec_postprocess import CANLabelDecode, CANLabelDecodeV2
 
 
 def build_post_process(config, global_config=None):
@@ -96,6 +96,7 @@ def build_post_process(config, global_config=None):
         "RFLLabelDecode",
         "DRRGPostprocess",
         "CANLabelDecode",
+        "CANLabelDecodeV2",
         "SATRNLabelDecode",
         "ParseQLabelDecode",
         "CPPDLabelDecode",
