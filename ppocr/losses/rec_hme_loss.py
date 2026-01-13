@@ -388,11 +388,15 @@ class HMELossV2(nn.Layer):
         loss_ce = (loss_ce * mask).sum() / (mask.sum() + 1e-8)
 
         # Total loss with auxiliary MoE loss
+        # Ensure aux_loss is a tensor for consistent return type
+        if isinstance(aux_loss, (int, float)):
+            aux_loss = paddle.to_tensor(aux_loss, dtype='float32')
+
         total_loss = loss_ce + self.aux_loss_weight * aux_loss
 
         return {
             'loss': total_loss,
             'loss_ce': loss_ce,
-            'loss_aux': aux_loss if isinstance(aux_loss, float) else aux_loss.item() if hasattr(aux_loss, 'item') else float(aux_loss),
+            'loss_aux': aux_loss,
         }
 
