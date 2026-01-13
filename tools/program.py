@@ -368,7 +368,7 @@ def train(
                         preds = model(images, data=batch[1:])
                     elif model_type in ["kie"]:
                         preds = model(batch)
-                    elif algorithm in ["CAN", "HME"]:
+                    elif algorithm in ["CAN", "HME", "HMEV2"]:
                         preds = model(batch[:3])
                     elif algorithm in [
                         "LaTeXOCR",
@@ -393,7 +393,7 @@ def train(
                     preds = model(images, data=batch[1:])
                 elif model_type in ["kie", "sr"]:
                     preds = model(batch)
-                elif algorithm in ["CAN", "HME"]:
+                elif algorithm in ["CAN", "HME", "HMEV2"]:
                     preds = model(batch[:3])
                 elif algorithm in [
                     "LaTeXOCR",
@@ -423,9 +423,13 @@ def train(
                 elif model_type in ["table"]:
                     post_result = post_process_class(preds, batch)
                     eval_class(post_result, batch)
-                elif algorithm in ["CAN", "HME", "HMEV2"]:
+                elif algorithm in ["CAN", "HME"]:
                     model_type = "can"
                     eval_class(preds[0], batch[2:], epoch_reset=(idx == 0))
+                elif algorithm in ["HMEV2"]:
+                    model_type = "can"
+                    logits = preds['logits'] if isinstance(preds, dict) else preds[0]
+                    eval_class(logits, batch[2:], epoch_reset=(idx == 0))
                 elif algorithm in ["LaTeXOCR"]:
                     model_type = "latexocr"
                     post_result = post_process_class(preds, batch[1], mode="train")
@@ -726,7 +730,7 @@ def eval(
                         preds = model(images, data=batch[1:])
                     elif model_type in ["kie"]:
                         preds = model(batch)
-                    elif model_type in ["can", "hme"]:
+                    elif model_type in ["can", "hme"] or algorithm in ["HMEV2"]:
                         preds = model(batch[:3])
                     elif model_type in ["latexocr"]:
                         preds = model(batch)
@@ -742,7 +746,7 @@ def eval(
                     preds = model(images, data=batch[1:])
                 elif model_type in ["kie"]:
                     preds = model(batch)
-                elif model_type in ["can", "hme"]:
+                elif model_type in ["can", "hme"] or algorithm in ["HMEV2"]:
                     preds = model(batch[:3])
                 elif model_type in ["latexocr", "unimernet", "pp_formulanet"]:
                     preds = model(batch)
@@ -770,8 +774,12 @@ def eval(
                     eval_class(post_result, batch_numpy)
             elif model_type in ["sr"]:
                 eval_class(preds, batch_numpy)
-            elif model_type in ["can", "hme"] or algorithm in ["HMEV2"]:
+            elif model_type in ["can", "hme"]:
                 eval_class(preds[0], batch_numpy[2:], epoch_reset=(idx == 0))
+            elif algorithm in ["HMEV2"]:
+                # HMEV2 returns dict with 'logits' key
+                logits = preds['logits'] if isinstance(preds, dict) else preds[0]
+                eval_class(logits, batch_numpy[2:], epoch_reset=(idx == 0))
             elif model_type in ["latexocr", "unimernet", "pp_formulanet"]:
                 post_result = post_process_class(preds, batch[1], "eval")
                 eval_class(post_result[0], post_result[1], epoch_reset=(idx == 0))
