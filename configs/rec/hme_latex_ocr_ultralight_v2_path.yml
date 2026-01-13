@@ -59,7 +59,7 @@ Architecture:
     num_decoder_layers: 2
     d_ffn: 512
     dropout: 0.1
-    use_moe: True
+    use_moe: False
     num_experts: 2
     moe_top_k: 1
     use_mamba: False
