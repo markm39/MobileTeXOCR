@@ -409,6 +409,8 @@ class CANMetricV2(object):
             target_tokens = decoder_targets[i]
             mask = label_masks[i]
             seq_len = int(np.sum(mask)) if hasattr(mask, '__len__') else len(target_tokens)
+            # Cap seq_len to actual array length to prevent IndexError
+            seq_len = min(seq_len, len(target_tokens))
 
             # Convert target indices to text
             target_symbols = []
