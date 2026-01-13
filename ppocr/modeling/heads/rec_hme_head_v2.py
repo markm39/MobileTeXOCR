@@ -317,6 +317,71 @@ class PaTHCrossAttention(nn.Layer):
 
 
 # ============================================================================
+# Standard Multi-Head Attention (Baseline)
+# ============================================================================
+
+class StandardAttention(nn.Layer):
+    """
+    Standard multi-head attention as baseline for comparison.
+    """
+
+    def __init__(self, d_model, nhead, dropout=0.1):
+        super().__init__()
+        assert d_model % nhead == 0
+        self.d_model = d_model
+        self.nhead = nhead
+        self.head_dim = d_model // nhead
+
+        self.q_proj = nn.Linear(d_model, d_model)
+        self.k_proj = nn.Linear(d_model, d_model)
+        self.v_proj = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+
+        self.dropout = nn.Dropout(dropout)
+        self.scale = self.head_dim ** -0.5
+
+    def forward(self, query, key, value, attn_mask=None, key_padding_mask=None):
+        """
+        Args:
+            query: [B, Tq, D]
+            key: [B, Tk, D]
+            value: [B, Tk, D]
+        Returns:
+            [B, Tq, D]
+        """
+        B, Tq, _ = query.shape
+        Tk = key.shape[1]
+
+        # Project and reshape
+        q = self.q_proj(query).reshape([B, Tq, self.nhead, self.head_dim]).transpose([0, 2, 1, 3])
+        k = self.k_proj(key).reshape([B, Tk, self.nhead, self.head_dim]).transpose([0, 2, 1, 3])
+        v = self.v_proj(value).reshape([B, Tk, self.nhead, self.head_dim]).transpose([0, 2, 1, 3])
+
+        # Scaled dot-product attention
+        attn = paddle.matmul(q, k.transpose([0, 1, 3, 2])) * self.scale
+
+        if attn_mask is not None:
+            if attn_mask.ndim == 2:
+                attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
+            elif attn_mask.ndim == 3:
+                attn_mask = attn_mask.unsqueeze(1)
+            attn = attn + attn_mask
+
+        if key_padding_mask is not None:
+            mask = key_padding_mask.unsqueeze(1).unsqueeze(2).astype('float32') * (-1e9)
+            attn = attn + mask
+
+        attn = F.softmax(attn, axis=-1)
+        attn = self.dropout(attn)
+
+        out = paddle.matmul(attn, v)
+        out = out.transpose([0, 2, 1, 3]).reshape([B, Tq, self.d_model])
+        out = self.out_proj(out)
+
+        return out
+
+
+# ============================================================================
 # Differential Attention (ICLR 2025)
 # ============================================================================
 
@@ -663,25 +728,27 @@ class MoEFFN(nn.Layer):
 class DecoderLayerV2(nn.Layer):
     """
     Decoder layer with:
-    - Differential self-attention OR PaTH attention
-    - Differential cross-attention OR PaTH cross-attention
+    - Standard attention (baseline) OR Differential attention OR PaTH attention
     - MoE FFN (optional)
     """
 
     def __init__(self, d_model, nhead, d_ffn=1024, dropout=0.1,
                  use_moe=False, num_experts=2, moe_top_k=1,
-                 attention_type='differential'):
+                 attention_type='standard'):
         super().__init__()
         self.d_model = d_model
         self.attention_type = attention_type
 
-        # Self attention (differential or PaTH)
+        # Self attention and cross attention
         if attention_type == 'path':
             self.self_attn = PaTHCrossAttention(d_model, nhead, dropout)
             self.cross_attn = PaTHCrossAttention(d_model, nhead, dropout)
-        else:  # 'differential' (default)
+        elif attention_type == 'differential':
             self.self_attn = DifferentialAttention(d_model, nhead, dropout)
             self.cross_attn = DifferentialAttention(d_model, nhead, dropout)
+        else:  # 'standard' (default baseline)
+            self.self_attn = StandardAttention(d_model, nhead, dropout)
+            self.cross_attn = StandardAttention(d_model, nhead, dropout)
 
         self.norm1 = nn.LayerNorm(d_model)
         self.dropout1 = nn.Dropout(dropout)

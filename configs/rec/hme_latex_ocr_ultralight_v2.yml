@@ -59,6 +59,7 @@ Architecture:
     num_experts: 2
     moe_top_k: 1
     use_mamba: False
+    attention_type: standard  # Options: standard, differential, path
     max_len: 256
 
 Loss:
