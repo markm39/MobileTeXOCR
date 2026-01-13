@@ -13,7 +13,7 @@ Global:
   print_batch_step: 100
   save_model_dir: ./output/rec/hme_ultralight_v2/
   save_epoch_step: 10
-  eval_batch_step: [0, 2000]
+  eval_batch_step: [0, 100]  # Temporarily set to 100 to test eval; change back to 2000 after verification
   cal_metric_during_train: False
   pretrained_model:
   checkpoints:
