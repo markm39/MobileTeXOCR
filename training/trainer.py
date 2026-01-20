@@ -203,7 +203,7 @@ class Trainer:
 
     def train(self):
         """Run the full training loop."""
-        logger.info("Starting training...")
+        print(f"Starting training: {self.config.num_epochs} epochs, {len(self.train_loader)} batches/epoch", flush=True)
 
         for epoch in range(self.config.num_epochs):
             self.epoch = epoch
@@ -211,19 +211,19 @@ class Trainer:
             # Handle encoder freezing
             if epoch < self.config.freeze_encoder_epochs:
                 self.model.freeze_encoder()
-                logger.info(f"Epoch {epoch}: Encoder frozen")
+                print(f"Epoch {epoch}: Encoder frozen", flush=True)
             elif epoch == self.config.freeze_encoder_epochs:
                 self.model.unfreeze_encoder()
-                logger.info(f"Epoch {epoch}: Encoder unfrozen")
+                print(f"Epoch {epoch}: Encoder unfrozen", flush=True)
 
             # Train epoch
             train_metrics = self._train_epoch()
-            logger.info(f"Epoch {epoch} train: {train_metrics}")
+            print(f"Epoch {epoch} train: {train_metrics}", flush=True)
 
             # Run validation
             if self.val_loader is not None:
                 val_metrics = self.run_validation()
-                logger.info(f"Epoch {epoch} val: {val_metrics}")
+                print(f"Epoch {epoch} val: {val_metrics}", flush=True)
 
                 # Check for improvement
                 current_metric = val_metrics.get(self.config.early_stopping_metric, 0)
@@ -236,13 +236,13 @@ class Trainer:
 
                 # Early stopping
                 if self.patience_counter >= self.config.early_stopping_patience:
-                    logger.info(f"Early stopping after {epoch + 1} epochs")
+                    print(f"Early stopping after {epoch + 1} epochs", flush=True)
                     break
 
             # Save checkpoint
             self._save_checkpoint(f"epoch_{epoch}")
 
-        logger.info("Training complete!")
+        print(f"Training complete! Best metric: {self.best_metric:.4f}", flush=True)
         return self.best_metric
 
     def _train_epoch(self) -> Dict[str, float]:
@@ -260,6 +260,7 @@ class Trainer:
             # Logging
             if self.global_step % self.config.log_steps == 0:
                 lr = self.optimizer.param_groups[0]['lr']
+                print(f"Step {self.global_step}: loss={loss:.4f}, lr={lr:.2e}", flush=True)
                 logger.info(
                     f"Step {self.global_step}: loss={loss:.4f}, lr={lr:.2e}"
                 )
