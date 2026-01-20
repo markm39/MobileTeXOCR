@@ -4,7 +4,7 @@ Unified Text Spotting Decoder
 An autoregressive transformer decoder that generates both bounding boxes
 and LaTeX text in a single sequence. Inspired by VISTA-OCR and HunyuanOCR.
 
-Output format: <loc>x1,y1,x2,y2</loc> \LaTeX_content <sep> <loc>...</loc> ...
+Output format: <loc>x1,y1,x2,y2</loc> \\LaTeX_content <sep> <loc>...</loc> ...
 """
 
 from typing import Optional, Tuple, List
