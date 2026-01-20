@@ -19,7 +19,7 @@ import time
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import autocast, GradScaler
 
 from training.metrics import compute_metrics, ExpRate, SymbolAccuracy
 
@@ -103,7 +103,7 @@ class Trainer:
         # Mixed precision
         if self.config.use_amp:
             dtype = torch.float16 if self.config.amp_dtype == "float16" else torch.bfloat16
-            self.scaler = GradScaler() if dtype == torch.float16 else None
+            self.scaler = GradScaler('cuda') if dtype == torch.float16 else None
             self.amp_dtype = dtype
         else:
             self.scaler = None
