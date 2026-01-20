@@ -82,12 +82,17 @@ class MathWritingDataset(BaseDataset):
             # Try the requested split directory
             split_dir = data_dir / self.split
 
-            # MathWriting uses 'test' instead of 'val' - map accordingly
+            # MathWriting uses 'valid' instead of 'val' - map accordingly
             if not split_dir.exists() and self.split == "val":
-                # Try 'test' directory for validation
-                split_dir = data_dir / "test"
+                # Try 'valid' directory first (MathWriting naming)
+                split_dir = data_dir / "valid"
                 if split_dir.exists():
-                    logger.info("Using 'test' split as validation set")
+                    logger.info("Using 'valid' split as validation set")
+                else:
+                    # Try 'test' as fallback
+                    split_dir = data_dir / "test"
+                    if split_dir.exists():
+                        logger.info("Using 'test' split as validation set")
 
             if split_dir.exists():
                 self._load_inkml(split_dir)
@@ -97,8 +102,9 @@ class MathWritingDataset(BaseDataset):
                 if train_dir.exists():
                     # Check if we need to create a val split from train
                     val_dir = data_dir / "val"
+                    valid_dir = data_dir / "valid"
                     test_dir = data_dir / "test"
-                    needs_split = not val_dir.exists() and not test_dir.exists()
+                    needs_split = not val_dir.exists() and not valid_dir.exists() and not test_dir.exists()
 
                     if needs_split:
                         if self.split == "train":
