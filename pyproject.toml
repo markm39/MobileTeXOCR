@@ -1,75 +1,110 @@
 [build-system]
-requires = ["setuptools==72.1.0", "wheel", "setuptools_scm"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "paddleocr"
-# After each version release, the version number needs to be incremented
-dynamic = ["version"]
-description = "Awesome multilingual OCR and document parsing toolkits based on PaddlePaddle"
+name = "handwritten-latex-ocr"
+version = "0.1.0"
+description = "Handwritten LaTeX OCR using unified VLM-OCR architecture"
 authors = [
-    {name = "PaddlePaddle", email = "paddleocr@baidu.com"},
-]
-maintainers = [
-    {name = "PaddlePaddle", email = "paddleocr@baidu.com"},
+    {name = "Mark Miller"},
 ]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 keywords = [
     "ocr",
-    "textdetection",
-    "textrecognition",
-    "paddleocr",
-    "chineseocr",
-    "pp-ocr",
-    "pp-structure",
-    "document-parsing",
-    "pdf2markdown",
-    "kie",
-    "pp-chatocr",
-    "document-translation",
-    "rag"
+    "latex",
+    "handwriting",
+    "math",
+    "vision",
+    "transformer",
+    "coreml",
+    "ios",
 ]
 license = {text = "Apache License 2.0"}
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
-    "Natural Language :: Chinese (Simplified)",
     "Programming Language :: Python :: 3",
-    "Topic :: Utilities",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 dependencies = [
-    "paddlex[ocr-core]>=3.3.0,<3.4.0",
-    "PyYAML>=6",
-    "requests",
-    "typing-extensions>=4.12",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "numpy>=1.21.0",
+    "pillow>=9.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
-homepage = "https://github.com/PaddlePaddle/PaddleOCR"
-documentation = "https://github.com/PaddlePaddle/PaddleOCR/blob/main/README.md"
-repository = "https://github.com/PaddlePaddle/PaddleOCR.git"
-issues = "https://github.com/PaddlePaddle/PaddleOCR/issues"
-
-[project.scripts]
-paddleocr = "paddleocr.__main__:console_entry"
+homepage = "https://github.com/markmiller/MobileTeXOCR"
+repository = "https://github.com/markmiller/MobileTeXOCR.git"
 
 [project.optional-dependencies]
-doc-parser = ["paddlex[ocr,genai-client]>=3.3.0,<3.4.0"]
-ie = ["paddlex[ie]>=3.3.0,<3.4.0"]
-trans = ["paddlex[trans]>=3.3.0,<3.4.0"]
-all = ["paddlex[ocr,genai-client,ie,trans]>=3.3.0,<3.4.0"]
+train = [
+    "wandb>=0.15.0",
+    "tensorboard>=2.12.0",
+]
+export = [
+    "onnx>=1.14.0",
+    "onnxruntime>=1.15.0",
+    "coremltools>=7.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "handwritten-latex-ocr[train,export,dev]",
+]
+
+[project.scripts]
+latex-ocr-train = "training.train:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["paddleocr", "paddleocr.*"]
+include = ["models*", "data*", "training*", "export*"]
 namespaces = false
 
-[tool.setuptools_scm]
-version_scheme = 'release-branch-semver'
-
 [tool.pytest.ini_options]
-markers = [
-    "resource_intensive: mark a test as resource intensive"
-]
-addopts = "-m 'not resource_intensive'"
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.mypy_cache
+    | \.venv
+    | build
+    | dist
+    | ios
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip = [".git", ".mypy_cache", ".venv", "build", "dist", "ios"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["ios/"]

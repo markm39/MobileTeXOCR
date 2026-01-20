@@ -7,28 +7,58 @@ __pycache__/
 # C extensions
 *.so
 
-inference/
-inference_results/
-output/
-train_data/
-log/
+# Output directories
+outputs/
+checkpoints/
+logs/
+
+# Data directories (download separately)
+data/mathwriting/
+data/crohme/
+data/hme100k/
+
+# Model files
+*.pt
+*.pth
+*.onnx
+*.mlpackage/
+*.mlmodel
+
+# OS files
 *.DS_Store
-*.vs
+.vs
 *.user
 *~
-*.vscode
-*.idea
 
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
 *.log
-.clang-format
-.clang_format.hook
 
+# Build
 build/
 dist/
 *.egg-info/
-/deploy/android_demo/app/OpenCV/
-/deploy/android_demo/app/PaddleLite/
-/deploy/android_demo/app/.cxx/
-/deploy/android_demo/app/cache/
-test_tipc/web/models/
-test_tipc/web/node_modules/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Weights & Biases
+wandb/

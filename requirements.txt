@@ -1,18 +1,15 @@
-shapely
-scikit-image
-pyclipper
-lmdb
-tqdm
-numpy
-rapidfuzz
-torch  # Used for DataLoader (Paddle's DataLoader has a numpy array corruption bug)
-opencv-python
-opencv-contrib-python
-cython
-Pillow
-pyyaml
-requests
-albumentations
-# to be compatible with albumentations
-albucore
-packaging
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.21.0
+pillow>=9.0.0
+pyyaml>=6.0
+
+# Optional: Training
+# wandb>=0.15.0
+# tensorboard>=2.12.0
+
+# Optional: Export
+# onnx>=1.14.0
+# onnxruntime>=1.15.0
+# coremltools>=7.0
