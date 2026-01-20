@@ -79,7 +79,38 @@ class MathWritingDataset(BaseDataset):
         if self.use_prerendered and prerendered_dir.exists() and labels_file.exists():
             self._load_prerendered(prerendered_dir, labels_file)
         else:
-            self._load_inkml(data_dir / self.split)
+            # Try the requested split directory
+            split_dir = data_dir / self.split
+
+            # MathWriting uses 'test' instead of 'val' - map accordingly
+            if not split_dir.exists() and self.split == "val":
+                # Try 'test' directory for validation
+                split_dir = data_dir / "test"
+                if split_dir.exists():
+                    logger.info("Using 'test' split as validation set")
+
+            if split_dir.exists():
+                self._load_inkml(split_dir)
+            else:
+                # No dedicated split dir - create splits from train
+                train_dir = data_dir / "train"
+                if train_dir.exists():
+                    # Check if we need to create a val split from train
+                    val_dir = data_dir / "val"
+                    test_dir = data_dir / "test"
+                    needs_split = not val_dir.exists() and not test_dir.exists()
+
+                    if needs_split:
+                        if self.split == "train":
+                            logger.info("No val/test split found, using 90% of data for training")
+                            self._load_inkml_with_split(train_dir, val_ratio=0.1, use_val=False)
+                        else:
+                            logger.info(f"No {self.split} split found, using 10% of train data")
+                            self._load_inkml_with_split(train_dir, val_ratio=0.1, use_val=True)
+                    else:
+                        logger.warning(f"Split directory not found: {split_dir}")
+                else:
+                    logger.warning(f"No data found in {data_dir}")
 
         logger.info(f"Loaded {len(self.samples)} MathWriting samples for {self.split}")
 
@@ -97,6 +128,48 @@ class MathWritingDataset(BaseDataset):
                     'bbox': None,  # Full image
                     'metadata': {'source': 'mathwriting', 'id': image_id},
                 })
+
+    def _load_inkml_with_split(self, inkml_dir: Path, val_ratio: float = 0.1, use_val: bool = True):
+        """Load InkML files and split into train/val.
+
+        Args:
+            inkml_dir: Directory with InkML files
+            val_ratio: Fraction of data to use for validation
+            use_val: If True, return val portion; if False, return train portion
+        """
+        if not inkml_dir.exists():
+            logger.warning(f"InkML directory not found: {inkml_dir}")
+            return
+
+        # Find all InkML files
+        inkml_files = sorted(list(inkml_dir.rglob("*.inkml")) + list(inkml_dir.rglob("*.xml")))
+
+        # Deterministic split based on hash
+        val_files = []
+        train_files = []
+        for f in inkml_files:
+            # Use hash for deterministic split
+            if hash(f.stem) % 100 < val_ratio * 100:
+                val_files.append(f)
+            else:
+                train_files.append(f)
+
+        files_to_load = val_files if use_val else train_files
+        logger.info(f"Split: {len(train_files)} train, {len(val_files)} val files")
+
+        for inkml_path in files_to_load:
+            try:
+                strokes, latex = self._parse_inkml(inkml_path)
+                if strokes and latex:
+                    self.samples.append({
+                        'inkml_path': str(inkml_path),
+                        'strokes': strokes,
+                        'latex': latex,
+                        'bbox': None,
+                        'metadata': {'source': 'mathwriting', 'id': inkml_path.stem},
+                    })
+            except Exception as e:
+                logger.debug(f"Failed to parse {inkml_path}: {e}")
 
     def _load_inkml(self, inkml_dir: Path):
         """Load InkML files and prepare for rendering."""
