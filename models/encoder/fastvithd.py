@@ -431,7 +431,7 @@ def fastvithd_base(image_size: int = 384, output_dim: int = 384) -> FastViTHD:
             (512, 6),
             (512, 6),
         ],
-        num_heads=12,
+        num_heads=8,  # 512/8=64 head_dim (was 12 which doesn't divide 512)
     )
 
 
