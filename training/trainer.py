@@ -203,9 +203,10 @@ class Trainer:
 
     def train(self):
         """Run the full training loop."""
-        print(f"Starting training: {self.config.num_epochs} epochs, {len(self.train_loader)} batches/epoch", flush=True)
+        start_epoch = self.epoch  # Resume from saved epoch
+        print(f"Starting training: epochs {start_epoch}-{self.config.num_epochs-1}, {len(self.train_loader)} batches/epoch, step {self.global_step}", flush=True)
 
-        for epoch in range(self.config.num_epochs):
+        for epoch in range(start_epoch, self.config.num_epochs):
             self.epoch = epoch
 
             # Handle encoder freezing
@@ -215,6 +216,9 @@ class Trainer:
             elif epoch == self.config.freeze_encoder_epochs:
                 self.model.unfreeze_encoder()
                 print(f"Epoch {epoch}: Encoder unfrozen", flush=True)
+            else:
+                # Ensure encoder is unfrozen for epochs after freeze period
+                self.model.unfreeze_encoder()
 
             # Train epoch
             train_metrics = self._train_epoch()
@@ -420,4 +424,4 @@ class Trainer:
         self.epoch = checkpoint['epoch']
         self.best_metric = checkpoint.get('best_metric', 0.0)
 
-        logger.info(f"Loaded checkpoint from step {self.global_step}")
+        print(f"Loaded checkpoint: epoch {self.epoch}, step {self.global_step}, best_metric {self.best_metric:.4f}", flush=True)
