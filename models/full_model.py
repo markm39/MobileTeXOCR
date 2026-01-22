@@ -172,12 +172,13 @@ class HandwrittenLaTeXOCR(nn.Module):
             else:
                 input_padding_mask = None
 
-            # Forward through decoder (returns tuple with cache, we don't need cache for training)
+            # Forward through decoder (returns tuple with cache)
             logits, _ = self.decoder(
                 encoder_features,
                 input_ids,
                 encoder_padding_mask=encoder_output.attention_mask,
                 target_padding_mask=input_padding_mask,
+                use_cache=False,  # No caching during training
             )
 
             # Compute loss
@@ -189,12 +190,13 @@ class HandwrittenLaTeXOCR(nn.Module):
             return OCROutput(logits=logits, loss=loss)
 
         else:
-            # Inference mode: autoregressive generation
+            # Inference mode: autoregressive generation with KV-caching
             token_ids = self.decoder.greedy_decode(
                 encoder_features,
                 self.tokenizer,
                 max_length=self.config.max_seq_length,
                 encoder_padding_mask=encoder_output.attention_mask,
+                use_cache=True,  # Enable KV-caching for speed
             )
 
             # Decode to (bbox, latex) pairs
@@ -212,6 +214,7 @@ class HandwrittenLaTeXOCR(nn.Module):
         temperature: float = 1.0,
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
+        use_cache: bool = True,
     ) -> OCROutput:
         """Generate predictions with sampling options.
 
@@ -221,6 +224,7 @@ class HandwrittenLaTeXOCR(nn.Module):
             temperature: Sampling temperature
             top_k: Top-k sampling
             top_p: Nucleus sampling threshold
+            use_cache: Whether to use KV-caching (recommended)
 
         Returns:
             OCROutput with predictions
@@ -235,6 +239,7 @@ class HandwrittenLaTeXOCR(nn.Module):
             top_k=top_k,
             top_p=top_p,
             encoder_padding_mask=encoder_output.attention_mask,
+            use_cache=use_cache,
         )
 
         predictions = [
@@ -250,6 +255,7 @@ class HandwrittenLaTeXOCR(nn.Module):
         beam_size: int = 5,
         max_length: int = 256,
         length_penalty: float = 1.0,
+        use_cache: bool = True,
     ) -> OCROutput:
         """Generate predictions using beam search for better quality.
 
@@ -258,6 +264,7 @@ class HandwrittenLaTeXOCR(nn.Module):
             beam_size: Number of beams (higher = better quality, slower)
             max_length: Maximum generation length
             length_penalty: Penalty for longer sequences (>1 favors longer)
+            use_cache: Whether to use KV-caching (recommended for speed)
 
         Returns:
             OCROutput with predictions
@@ -271,6 +278,7 @@ class HandwrittenLaTeXOCR(nn.Module):
             max_length=max_length,
             length_penalty=length_penalty,
             encoder_padding_mask=encoder_output.attention_mask,
+            use_cache=use_cache,
         )
 
         predictions = [

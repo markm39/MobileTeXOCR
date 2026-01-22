@@ -1,0 +1,86 @@
+# 15M Parameter Model Configuration for Thunder Compute A100
+# Optimized for handwritten LaTeX OCR training
+
+# Model settings (~15M params)
+model:
+  encoder_type: fastvithd
+  encoder_size: small      # Smaller encoder for 15M model
+  image_size: 384
+  d_model: 384
+  num_decoder_layers: 6
+  num_heads: 8
+  dim_feedforward: 1536    # 4x d_model
+  freeze_encoder: false
+  dropout: 0.1
+
+# Data settings
+data:
+  data_dir: ./data
+  datasets:
+    - mathwriting
+    - crohme
+    - hme100k
+  image_size: 384
+  max_seq_length: 512
+  num_location_bins: 1000
+  augment_strength: medium
+
+# Training settings (A100 optimized)
+training:
+  output_dir: ./outputs
+  experiment_name: latex_ocr_15m
+  num_epochs: 20
+  batch_size: 128          # A100 80GB can handle large batches
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+
+  # Mode collapse prevention
+  label_smoothing: 0.1     # Smoothing to prevent overconfidence
+  dropout: 0.1             # Regularization
+
+# Optimizer settings
+optimizer:
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  warmup_steps: 2000
+  lr_scheduler: cosine
+
+# Mixed precision (A100 supports BF16 natively)
+amp:
+  enabled: true
+  dtype: bfloat16          # BF16 for better numerical stability on A100
+
+# Checkpointing
+checkpointing:
+  save_steps: 2000
+  validation_steps: 1000
+  save_total_limit: 5
+
+# Logging
+logging:
+  log_steps: 100
+  use_wandb: false         # Set to true if wandb is configured
+  wandb_project: latex-ocr
+
+# Mode collapse monitoring
+monitoring:
+  diversity_check_steps: 500      # Check prediction diversity every N steps
+  log_sample_predictions: true    # Print sample predictions for manual review
+  min_unique_ratio: 0.5           # Warn if < 50% unique predictions in batch
+
+# Early stopping
+early_stopping:
+  patience: 5
+  metric: exp_rate
+  min_delta: 0.001         # Minimum improvement to reset patience
+
+# Encoder training strategy
+encoder_training:
+  freeze_encoder_epochs: 1  # Freeze encoder for first epoch to warm up decoder
+
+# Decoding settings
+decoding:
+  default_method: greedy   # greedy or beam
+  beam_size: 5             # For beam search
+  length_penalty: 1.0      # Length normalization for beam search
+  use_kv_cache: true       # Enable KV-caching for faster inference
