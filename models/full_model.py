@@ -172,8 +172,8 @@ class HandwrittenLaTeXOCR(nn.Module):
             else:
                 input_padding_mask = None
 
-            # Forward through decoder
-            logits = self.decoder(
+            # Forward through decoder (returns tuple with cache, we don't need cache for training)
+            logits, _ = self.decoder(
                 encoder_features,
                 input_ids,
                 encoder_padding_mask=encoder_output.attention_mask,
