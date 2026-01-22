@@ -414,6 +414,132 @@ class UnifiedDecoder(nn.Module):
 
         return generated.tolist()
 
+    @torch.no_grad()
+    def beam_search(
+        self,
+        encoder_out: torch.Tensor,
+        tokenizer: LaTeXTokenizer,
+        beam_size: int = 5,
+        max_length: int = 256,
+        length_penalty: float = 1.0,
+        encoder_padding_mask: Optional[torch.Tensor] = None,
+    ) -> List[List[int]]:
+        """Beam search decoding for better quality.
+
+        Args:
+            encoder_out: Encoder features [B, N, D]
+            tokenizer: Tokenizer instance
+            beam_size: Number of beams to keep
+            max_length: Maximum generation length
+            length_penalty: Penalty for longer sequences (>1 favors longer)
+            encoder_padding_mask: [B, N] True for padding positions
+
+        Returns:
+            List of best token sequences (one per batch item)
+        """
+        B = encoder_out.shape[0]
+        device = encoder_out.device
+        vocab_size = self.output_proj.out_features
+
+        # Process one batch item at a time for simplicity
+        all_best_sequences = []
+
+        for b in range(B):
+            # Get encoder output for this item [1, N, D]
+            enc_out = encoder_out[b:b+1]
+            enc_mask = encoder_padding_mask[b:b+1] if encoder_padding_mask is not None else None
+
+            # Expand for beam search [beam_size, N, D]
+            enc_out_expanded = enc_out.expand(beam_size, -1, -1)
+            enc_mask_expanded = enc_mask.expand(beam_size, -1) if enc_mask is not None else None
+
+            # Initialize beams: (score, sequence)
+            # Start with BOS token
+            sequences = torch.full((beam_size, 1), tokenizer.bos_token_id, dtype=torch.long, device=device)
+            scores = torch.zeros(beam_size, device=device)
+
+            # Only first beam is active initially
+            scores[1:] = float('-inf')
+
+            finished_seqs = []
+            finished_scores = []
+
+            for step in range(max_length - 1):
+                # Forward pass [beam_size, seq_len, vocab_size]
+                logits = self.forward(enc_out_expanded, sequences, enc_mask_expanded)
+                next_logits = logits[:, -1, :]  # [beam_size, vocab_size]
+                log_probs = F.log_softmax(next_logits, dim=-1)
+
+                # Add current scores [beam_size, vocab_size]
+                next_scores = scores.unsqueeze(-1) + log_probs
+
+                # Flatten for top-k selection [beam_size * vocab_size]
+                next_scores_flat = next_scores.view(-1)
+
+                # Get top beam_size candidates
+                top_scores, top_indices = torch.topk(next_scores_flat, beam_size, dim=-1)
+
+                # Convert flat indices to beam and token indices
+                beam_indices = top_indices // vocab_size
+                token_indices = top_indices % vocab_size
+
+                # Build new sequences
+                new_sequences = torch.cat([
+                    sequences[beam_indices],
+                    token_indices.unsqueeze(-1)
+                ], dim=1)
+
+                # Check for finished sequences (EOS token)
+                is_eos = token_indices == tokenizer.eos_token_id
+
+                for i in range(beam_size):
+                    if is_eos[i]:
+                        # Apply length penalty
+                        seq_len = new_sequences[i].shape[0]
+                        final_score = top_scores[i] / (seq_len ** length_penalty)
+                        finished_seqs.append(new_sequences[i].tolist())
+                        finished_scores.append(final_score.item())
+
+                # Continue with non-finished beams
+                continuing = ~is_eos
+                if continuing.sum() == 0:
+                    break
+
+                # Keep only continuing beams (refill if needed)
+                if continuing.sum() < beam_size:
+                    # Pad with best continuing beam
+                    continuing_indices = continuing.nonzero(as_tuple=True)[0]
+                    n_continuing = len(continuing_indices)
+                    if n_continuing > 0:
+                        pad_indices = continuing_indices[0].expand(beam_size - n_continuing)
+                        all_indices = torch.cat([continuing_indices, pad_indices])
+                        sequences = new_sequences[all_indices]
+                        scores = top_scores[all_indices]
+                        scores[n_continuing:] = float('-inf')
+                    else:
+                        break
+                else:
+                    sequences = new_sequences
+                    scores = top_scores
+
+            # Add any remaining sequences
+            for i in range(beam_size):
+                if scores[i] > float('-inf'):
+                    seq_len = sequences[i].shape[0]
+                    final_score = scores[i] / (seq_len ** length_penalty)
+                    finished_seqs.append(sequences[i].tolist())
+                    finished_scores.append(final_score.item())
+
+            # Select best sequence
+            if finished_seqs:
+                best_idx = max(range(len(finished_scores)), key=lambda i: finished_scores[i])
+                all_best_sequences.append(finished_seqs[best_idx])
+            else:
+                # Fallback to first beam
+                all_best_sequences.append(sequences[0].tolist())
+
+        return all_best_sequences
+
 
 def create_decoder(
     d_model: int = 384,

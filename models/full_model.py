@@ -244,6 +244,42 @@ class HandwrittenLaTeXOCR(nn.Module):
 
         return OCROutput(predictions=predictions, token_ids=token_ids)
 
+    def beam_search(
+        self,
+        images: torch.Tensor,
+        beam_size: int = 5,
+        max_length: int = 256,
+        length_penalty: float = 1.0,
+    ) -> OCROutput:
+        """Generate predictions using beam search for better quality.
+
+        Args:
+            images: Input images [B, 3, H, W]
+            beam_size: Number of beams (higher = better quality, slower)
+            max_length: Maximum generation length
+            length_penalty: Penalty for longer sequences (>1 favors longer)
+
+        Returns:
+            OCROutput with predictions
+        """
+        encoder_output = self.encoder(images)
+
+        token_ids = self.decoder.beam_search(
+            encoder_output.features,
+            self.tokenizer,
+            beam_size=beam_size,
+            max_length=max_length,
+            length_penalty=length_penalty,
+            encoder_padding_mask=encoder_output.attention_mask,
+        )
+
+        predictions = [
+            self.tokenizer.decode_sequence(ids)
+            for ids in token_ids
+        ]
+
+        return OCROutput(predictions=predictions, token_ids=token_ids)
+
     def count_parameters(self) -> int:
         """Count total trainable parameters."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

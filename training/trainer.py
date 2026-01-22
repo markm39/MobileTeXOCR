@@ -114,6 +114,7 @@ class Trainer:
         self.epoch = 0
         self.best_metric = 0.0
         self.patience_counter = 0
+        self.history = []  # Track all metrics for comparison
 
         # Output directory
         self.output_dir = Path(self.config.output_dir) / self.config.experiment_name
@@ -228,6 +229,15 @@ class Trainer:
             if self.val_loader is not None:
                 val_metrics = self.run_validation()
                 print(f"Epoch {epoch} val: {val_metrics}", flush=True)
+
+                # Save to history
+                self.history.append({
+                    'epoch': epoch,
+                    'step': self.global_step,
+                    'train': train_metrics,
+                    'val': val_metrics,
+                })
+                self._save_history()
 
                 # Check for improvement
                 current_metric = val_metrics.get(self.config.early_stopping_metric, 0)
@@ -410,6 +420,12 @@ class Trainer:
                 checkpoint.unlink()
                 logger.debug(f"Removed old checkpoint: {checkpoint}")
 
+    def _save_history(self):
+        """Save training history to JSON for later analysis."""
+        history_path = self.output_dir / "training_history.json"
+        with open(history_path, 'w') as f:
+            json.dump(self.history, f, indent=2)
+
     def load_checkpoint(self, path: str):
         """Load a checkpoint."""
         checkpoint = torch.load(path, map_location=self.device)
@@ -423,5 +439,11 @@ class Trainer:
         self.global_step = checkpoint['global_step']
         self.epoch = checkpoint['epoch']
         self.best_metric = checkpoint.get('best_metric', 0.0)
+
+        # Load history if available
+        history_path = self.output_dir / "training_history.json"
+        if history_path.exists():
+            with open(history_path, 'r') as f:
+                self.history = json.load(f)
 
         print(f"Loaded checkpoint: epoch {self.epoch}, step {self.global_step}, best_metric {self.best_metric:.4f}", flush=True)
