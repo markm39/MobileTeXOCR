@@ -63,49 +63,81 @@ def download_progress(count, block_size, total_size):
 def download_mathwriting(output_dir: Path):
     """Download MathWriting dataset from Google Cloud Storage."""
     print("\n" + "=" * 60)
-    print("MATHWRITING DATASET")
+    print("MATHWRITING DATASET (2.9GB)")
     print("=" * 60)
 
     mathwriting_dir = output_dir / "mathwriting"
+
+    # Check if already downloaded
+    if (mathwriting_dir / "train").exists() and any((mathwriting_dir / "train").iterdir()):
+        print(f"\nMathWriting already exists at {mathwriting_dir}")
+        return True
+
     mathwriting_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if gsutil is available
-    gsutil_available = shutil.which("gsutil") is not None
+    # Direct download URL (doesn't require gsutil!)
+    url = "https://storage.googleapis.com/mathwriting_data/mathwriting-2024.tgz"
+    tarball = output_dir / "mathwriting-2024.tgz"
 
-    if gsutil_available:
-        print("\nUsing gsutil to download from Google Cloud Storage...")
+    print(f"\nDownloading from: {url}")
+    print("This is ~2.9GB, may take a few minutes...")
 
-        # Download each split
-        for split in ["train", "valid", "test"]:
-            split_dir = mathwriting_dir / split
-            if split_dir.exists() and any(split_dir.iterdir()):
-                print(f"  {split} split already exists, skipping...")
-                continue
-
-            cmd = f"gsutil -m cp -r gs://mathwriting_data/{split} {mathwriting_dir}/"
-            if not run_command(cmd, f"Downloading {split} split"):
-                print(f"  Failed to download {split} split")
+    # Try wget first (faster, shows progress)
+    if shutil.which("wget"):
+        cmd = f"wget -q --show-progress {url} -O {tarball}"
+        if not run_command(cmd, "Downloading with wget"):
+            print("wget failed, trying curl...")
+            if shutil.which("curl"):
+                cmd = f"curl -L -o {tarball} {url}"
+                if not run_command(cmd, "Downloading with curl"):
+                    return False
+            else:
+                return False
+    elif shutil.which("curl"):
+        cmd = f"curl -L -o {tarball} {url}"
+        if not run_command(cmd, "Downloading with curl"):
+            return False
     else:
-        print("\ngsutil not found. Install Google Cloud SDK or download manually.")
-        print("\nManual download instructions:")
-        print("  1. Install gsutil: https://cloud.google.com/storage/docs/gsutil_install")
-        print("  2. Run: gsutil -m cp -r gs://mathwriting_data/* data/mathwriting/")
-        print("\n  Or download from the paper's resources:")
-        print("  https://arxiv.org/abs/2404.10690")
-        print("  https://github.com/google-research/google-research/tree/master/mathwriting")
+        print("Neither wget nor curl found. Trying Python urllib...")
+        if not download_file(url, str(tarball), "Downloading MathWriting"):
+            return False
 
-        # Try alternative: wget with public URL if available
-        print("\nAttempting alternative download...")
-
-        # The data might be available via direct HTTP too
-        # For now, create placeholder structure
-        for split in ["train", "valid", "test"]:
-            (mathwriting_dir / split).mkdir(exist_ok=True)
-
-        print("\nPlease download manually and extract to:", mathwriting_dir)
+    # Extract
+    print(f"\nExtracting to {output_dir}...")
+    cmd = f"tar -xzf {tarball} -C {output_dir}"
+    if not run_command(cmd, "Extracting tarball"):
         return False
 
+    # The tarball extracts to mathwriting-2024/, rename to mathwriting/
+    extracted_dir = output_dir / "mathwriting-2024"
+    if extracted_dir.exists():
+        print("Reorganizing directory structure...")
+        for item in extracted_dir.iterdir():
+            dest = mathwriting_dir / item.name
+            if dest.exists():
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                else:
+                    dest.unlink()
+            shutil.move(str(item), str(dest))
+        extracted_dir.rmdir()
+
+    # Cleanup tarball
+    if tarball.exists():
+        tarball.unlink()
+        print("Cleaned up tarball")
+
     print(f"\nMathWriting downloaded to: {mathwriting_dir}")
+
+    # Show structure
+    print("\nDirectory structure:")
+    for item in sorted(mathwriting_dir.iterdir()):
+        if item.is_dir():
+            count = len(list(item.iterdir()))
+            print(f"  {item.name}/  ({count} items)")
+        else:
+            print(f"  {item.name}")
+
     return True
 
 
