@@ -86,6 +86,7 @@ class ThunderTrainer:
         tokenizer: LaTeXTokenizer,
         output_dir: Path,
         logger: logging.Logger,
+        lr_override: Optional[float] = None,
     ):
         self.model = model
         self.train_loader = train_loader
@@ -94,6 +95,7 @@ class ThunderTrainer:
         self.tokenizer = tokenizer
         self.output_dir = output_dir
         self.logger = logger
+        self.lr_override = lr_override
 
         # Setup device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -482,7 +484,14 @@ class ThunderTrainer:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-        if self.scheduler and checkpoint.get('scheduler_state_dict'):
+        # If LR was overridden, don't restore scheduler (use fresh schedule with new LR)
+        if self.lr_override:
+            self.logger.info(f"LR override: {self.lr_override} - using fresh scheduler")
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.lr_override
+            # Recreate scheduler with new LR
+            self.scheduler = self._create_scheduler()
+        elif self.scheduler and checkpoint.get('scheduler_state_dict'):
             self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         state = checkpoint.get('state', {})
@@ -518,6 +527,8 @@ def main():
     parser.add_argument('--batch_size', type=int, help='Override batch size')
     parser.add_argument('--num_epochs', type=int, help='Override number of epochs')
     parser.add_argument('--wandb', action='store_true', help='Enable wandb logging')
+    parser.add_argument('--lr', type=float, help='Override learning rate (useful when resuming)')
+    parser.add_argument('--max_grad_norm', type=float, help='Override gradient clipping threshold')
     args = parser.parse_args()
 
     # Load config
@@ -534,6 +545,10 @@ def main():
         config.setdefault('training', {})['num_epochs'] = args.num_epochs
     if args.wandb:
         config.setdefault('logging', {})['use_wandb'] = True
+    if args.lr:
+        config.setdefault('optimizer', {})['learning_rate'] = args.lr
+    if args.max_grad_norm:
+        config.setdefault('training', {})['max_grad_norm'] = args.max_grad_norm
 
     # Setup output directory
     train_config = config.get('training', {})
@@ -632,6 +647,7 @@ def main():
         tokenizer=tokenizer,
         output_dir=experiment_dir,
         logger=logger,
+        lr_override=args.lr,
     )
 
     # Resume if specified
