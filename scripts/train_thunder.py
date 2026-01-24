@@ -158,9 +158,10 @@ class ThunderTrainer:
         )
 
     def _create_scheduler(self):
-        """Create learning rate scheduler."""
+        """Create learning rate scheduler with warmup."""
         total_steps = len(self.train_loader) * self.train_config.get('num_epochs', 20)
         warmup_steps = self.opt_config.get('warmup_steps', 2000)
+        max_lr = self.lr_override or self.opt_config.get('learning_rate', 1e-4)
 
         from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
@@ -173,12 +174,26 @@ class ThunderTrainer:
         cosine = CosineAnnealingLR(
             self.optimizer,
             T_max=total_steps - warmup_steps,
-            eta_min=self.opt_config.get('learning_rate', 1e-4) * 0.01,
+            eta_min=max_lr * 0.01,
         )
         return SequentialLR(
             self.optimizer,
             schedulers=[warmup, cosine],
             milestones=[warmup_steps],
+        )
+
+    def _create_scheduler_no_warmup(self):
+        """Create cosine scheduler without warmup (for resuming with new LR)."""
+        remaining_epochs = self.train_config.get('num_epochs', 20) - self.state.epoch
+        remaining_steps = len(self.train_loader) * remaining_epochs
+        max_lr = self.lr_override or self.opt_config.get('learning_rate', 1e-4)
+
+        from torch.optim.lr_scheduler import CosineAnnealingLR
+
+        return CosineAnnealingLR(
+            self.optimizer,
+            T_max=remaining_steps,
+            eta_min=max_lr * 0.01,
         )
 
     def check_prediction_diversity(self, predictions: List[str]) -> Dict[str, Any]:
@@ -486,11 +501,12 @@ class ThunderTrainer:
 
         # If LR was overridden, don't restore scheduler (use fresh schedule with new LR)
         if self.lr_override:
-            self.logger.info(f"LR override: {self.lr_override} - using fresh scheduler")
+            self.logger.info(f"LR override: {self.lr_override} - using fresh cosine schedule from this LR")
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.lr_override
-            # Recreate scheduler with new LR
-            self.scheduler = self._create_scheduler()
+                param_group['initial_lr'] = self.lr_override  # Critical: scheduler uses initial_lr
+            # Recreate scheduler - but skip warmup since we're resuming mid-training
+            self.scheduler = self._create_scheduler_no_warmup()
         elif self.scheduler and checkpoint.get('scheduler_state_dict'):
             self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
